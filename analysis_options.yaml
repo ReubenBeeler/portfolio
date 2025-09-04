@@ -32,6 +32,5 @@ formatter:
   page_width: 234
 analyzer:
   errors:
-    non_constant_identifier_names: ignore
     constant_identifier_names: ignore
 

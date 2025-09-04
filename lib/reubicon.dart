@@ -1,10 +1,9 @@
 import 'dart:math';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:portfolio/bootstrapper.dart';
-import 'package:portfolio/simple_animation.dart';
 import 'package:portfolio/util.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 enum CircleState {
   DEFAULT, // default state (directly correlated with mouse position)
@@ -17,208 +16,245 @@ enum IconState {
   DEFAULT, // default state (directly correlated with mouse position)
   DRAGGING, // follows mouse while dragging
   BOUNCING, // bounces back to DEFAULT location
+  RESTORING, // restores size to that of default state
 }
 
 class ReubIcon extends StatefulWidget {
-  final String asset_path;
-  final double square_size;
-  final Color default_color;
+  final Widget child;
+  final Color backgroundColor;
 
-  const ReubIcon({super.key, required this.asset_path, required this.square_size, required this.default_color});
+  const ReubIcon({super.key, required this.child, required this.backgroundColor});
 
   @override
   State<ReubIcon> createState() => _ReubIconState();
 }
 
 // class _ReubIconState extends State<ReubIcon> with TickerProviderStateMixin {
-class _ReubIconState extends AnimatedState<ReubIcon> {
-  final GlobalKey _parentKey = GlobalKey();
-  final GlobalKey _childKey = GlobalKey();
+class _ReubIconState extends AnimatedState<ReubIcon> with TickerProviderStateMixin {
+  final GlobalKey _key = GlobalKey();
 
-  late double _iconFrac; // frozen when dragging icon
-  late double _circFrac; // animates when dragging icon
+  // consolidate into _iconController and _circleController?
+  late final AnimationController _openingController = AnimationController(vsync: this)..autoDispose(this);
+  late final AnimationController _bouncingController = AnimationController(vsync: this)..autoDispose(this);
+  late final AnimationController _restoringController = AnimationController(vsync: this)..autoDispose(this);
 
-  late SimpleAnimationController _bounceController;
-  late SimpleAnimationController _restore_circleController;
-  late SimpleAnimationController _open_circleController;
+  CircleState _circleState = CircleState.DEFAULT;
+  late double _beginRestoreIconFraction;
+  late double _beginRestoreCircleFraction;
+  late double _beginOpeningCircleFraction;
 
-  CircleState _circle_state = CircleState.DEFAULT;
-  late double _open_circle_frac;
-  late double _restore_circle_frac;
-  late double _begin_restore_circle_frac;
+  IconState _iconState = IconState.DEFAULT;
+  late Offset _beginDraggingOffset;
+  late Offset _beginBouncingOffset;
 
-  IconState _icon_state = IconState.DEFAULT;
-  late double _bounce_frac;
-  late double _begin_icon_bounce_frac;
-  late Offset _drag;
-  late Offset _begin_drag_dragging;
-  late Offset _begin_drag_bouncing;
+  late Offset _parentGlobalPosition;
+  //   late Offset _begin_parent_global_position;
 
-  late Offset _parent_global_position;
-  late Offset _begin_parent_global_position;
+  Offset? _centerGlobalPosition;
+  late double _distFraction;
+  final ValueNotifier<double> _circleFraction = ValueNotifier(1);
+  final ValueNotifier<double> _iconFraction = ValueNotifier(1);
+  final ValueNotifier<Offset> _iconOffset = ValueNotifier(Offset.zero);
+
+  double _smoothenFraction(double fraction) {
+    return pow(sin((fraction) * pi / 2), 2).toDouble(); // a little smoothing at the ends
+  }
+
+  void _updateCircleFraction() {
+    switch (_circleState) {
+      case CircleState.DEFAULT:
+        _circleFraction.value = _distFraction;
+      case CircleState.OPENING:
+        _circleFraction.value = lerp(_beginOpeningCircleFraction, 0, _openingController.value);
+      case CircleState.OPENED:
+        _circleFraction.value = 0;
+      case CircleState.RESTORING:
+        _circleFraction.value = lerp(_beginRestoreCircleFraction, _distFraction, _restoringController.value);
+    }
+  }
+
+  void _updateDistFraction() {
+    if (_centerGlobalPosition == null) return;
+    double dist = (mouseGlobalPosition.value - _centerGlobalPosition!).distance;
+    _distFraction = clampDouble(dist / 300, 0, 1);
+    _updateIconFraction();
+    _updateCircleFraction();
+  }
+
+  void _updateIconFraction() {
+    switch (_iconState) {
+      case IconState.DEFAULT:
+        _iconFraction.value = _distFraction;
+      case IconState.RESTORING:
+        _iconFraction.value = lerp(_beginRestoreIconFraction, _distFraction, _restoringController.value);
+      default: // no change
+    }
+  }
+
+  void _updateIconOffset() {
+    switch (_iconState) {
+      case IconState.DEFAULT:
+        _iconOffset.value = Offset.zero;
+      case IconState.DRAGGING:
+        _iconOffset.value = mouseGlobalPosition.value - _beginDraggingOffset; // - (_parent_global_position - _begin_parent_global_position);
+      case IconState.BOUNCING:
+        _iconOffset.value = lerpOffset(_beginBouncingOffset, Offset.zero, const ConOscCurve(5, a: 3).transformInternal(_bouncingController.value));
+      case IconState.RESTORING:
+        _iconOffset.value = Offset.zero;
+    }
+  }
+
+  Map<void Function(), List<Listenable>> listenMap = {};
+
+  void addListener(void Function() listener, List<Listenable> listenables) {
+    for (var listenable in listenables) {
+      listenable.addListener(listener);
+    }
+    listenMap[listener] = listenables; // no copy
+  }
+
+  void removeListeners() {
+    for (var entry in listenMap.entries) {
+      for (var listenable in entry.value) {
+        listenable.removeListener(entry.key);
+      }
+    }
+    listenMap.clear();
+  }
 
   @override
-  List<AnimationController> create_controllers() {
-    void bounce_update(frac) => setState(() {
-      _icon_state = IconState.BOUNCING;
-      _bounce_frac = frac;
-    });
-    void open_circle_update(frac) => setState(() {
-      _circle_state = CircleState.OPENING;
-      _open_circle_frac = frac;
-    });
-    void restore_circle_update(frac) => setState(() {
-      _circle_state = CircleState.RESTORING;
-      _restore_circle_frac = frac;
-    });
-    _bounceController = SimpleAnimationController(vsync: this, update: bounce_update);
-    _open_circleController = SimpleAnimationController(vsync: this, update: open_circle_update);
-    _restore_circleController = SimpleAnimationController(vsync: this, update: restore_circle_update);
+  void initState() {
+    super.initState();
 
-    return [_bounceController, _open_circleController, _restore_circleController];
+    addListener(_updateDistFraction, [mouseGlobalPosition]);
+    addListener(_updateIconFraction, [_restoringController]);
+    addListener(_updateCircleFraction, [_openingController, _restoringController]);
+    addListener(_updateIconOffset, [_bouncingController]);
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+
+    removeListeners();
   }
 
   void _onPanStart(DragStartDetails details) {
-    _icon_state = IconState.DRAGGING;
-    _begin_drag_dragging = details.globalPosition;
-    _begin_parent_global_position = _parent_global_position = getGlobalOffset(_parentKey);
+    _iconState = IconState.DRAGGING;
+    _beginDraggingOffset = details.globalPosition;
+    // _begin_parent_global_position = _parent_global_position = getGlobalOffset(_parentKey);
 
-    _bounceController.stop();
-    _restore_circleController.stop(); // might already be stopped
+    _bouncingController.stop();
+    _restoringController.stop(); // might already be stopped
 
-    _open_circleController.run(const Duration(milliseconds: 500)).whenComplete(() => setState(() => _circle_state = CircleState.OPENED));
+    _circleState = CircleState.OPENING;
+    _beginOpeningCircleFraction = _circleFraction.value;
+    _openingController.start(const Duration(milliseconds: 500)).whenComplete(() => setState(() => _circleState = CircleState.OPENED));
+  }
 
-    setState(() {}); // just to prevent weirdness from not updating...
+  void _onPanUpdate(DragUpdateDetails details) {
+    _updateIconOffset(); // mouse position is in mouseGlobalPosition
   }
 
   void _onPanEnd(DragEndDetails details) {
-    _begin_icon_bounce_frac = _iconFrac;
-    _begin_drag_bouncing = _drag;
-    _bounceController.run(const Duration(milliseconds: 1500)).whenComplete(() {
-      _icon_state = IconState.DEFAULT;
-      _open_circleController.stop(); // should already be stopped because it's shorter than bounce animation
-      _begin_restore_circle_frac = _circFrac;
-      _restore_circleController.run(const Duration(milliseconds: 1000)).whenComplete(() => setState(() => _circle_state == CircleState.DEFAULT));
+    _beginBouncingOffset = _iconOffset.value;
+    _iconState = IconState.BOUNCING;
+    _bouncingController.start(const Duration(milliseconds: 1500)).whenComplete(() {
+      _openingController.stop(); // should already be stopped because it's shorter than bounce animation
+      _restoringController.reset();
+      setState(() {
+        _beginRestoreCircleFraction = _circleFraction.value;
+        _beginRestoreIconFraction = _iconFraction.value;
+        _circleState = CircleState.RESTORING;
+        _iconState = IconState.RESTORING;
+      });
+      _restoringController.start(const Duration(milliseconds: 1000)).whenComplete(() {
+        setState(() {
+          _circleState == CircleState.DEFAULT;
+          _iconState = IconState.DEFAULT;
+        });
+      });
     });
-
-    setState(() {}); // just to prevent weirdness from not updating...
   }
 
   @override
   Widget build(BuildContext context) {
-    return NotificationListener<ScrollNotification>(
-      onNotification: (scroll) {
-        setState(() => _parent_global_position = getGlobalOffset(_parentKey));
-        return false;
-      },
-      child: SingleChildScrollView(
-        // for testing scroll effects when dragging
-        child: SizedBox(
-          key: _parentKey,
-          height: MediaQuery.of(context).size.height * 4 / 3,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              return ValueListenableBuilder<Offset>(
-                valueListenable: mouseGlobalPosition,
-                builder: (_, mouseGlobalPosition, _) {
-                  final size = constraints.biggest;
-                  final center = size.center(Offset.zero);
-                  Offset centerGlobal = (context.findRenderObject() as RenderBox).localToGlobal(center);
-                  double dist = (mouseGlobalPosition - centerGlobal).distance;
-                  double distFrac = trim(dist / 300, 0, 1);
+    // return NotificationListener<ScrollNotification>(
+    //   onNotification: (scroll) {
+    //     setState(() => _parent_global_position = getGlobalOffset(_parentKey));
+    //     return false;
+    //   },
+    //   child: layout builder below
+    // );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = constraints.biggest;
+        final center = size.center(Offset.zero);
+        _centerGlobalPosition = (context.findRenderObject() as RenderBox).localToGlobal(center);
+        _updateDistFraction();
 
-                  switch (_circle_state) {
-                    case CircleState.DEFAULT:
-                      _circFrac = distFrac;
-                    case CircleState.OPENING:
-                      _circFrac = linterpolate(_circFrac, 0, _open_circle_frac);
-                    case CircleState.OPENED:
-                      _circFrac = 0;
-                    case CircleState.RESTORING:
-                      _circFrac = linterpolate(_begin_restore_circle_frac, distFrac, _restore_circle_frac);
-                  }
+        return Center(
+          child: ValueListenableBuilder(
+            valueListenable: _circleFraction,
+            builder: (_, circFrac, icon) {
+              num circFrac2 = _smoothenFraction(circFrac);
 
-                  switch (_icon_state) {
-                    case IconState.DEFAULT:
-                      _iconFrac = distFrac;
-                      _drag = Offset.zero;
-                    case IconState.DRAGGING:
-                      _iconFrac = _iconFrac; // freeze _iconFrac while dragging
-                      _drag = mouseGlobalPosition - _begin_drag_dragging - (_parent_global_position - _begin_parent_global_position);
-                    case IconState.BOUNCING:
-                      _iconFrac = linterpolate(_begin_icon_bounce_frac, distFrac, _bounce_frac);
-                      _drag = linterpolateOffset(_begin_drag_bouncing, Offset.zero, ConOscCurve(5, a: 3).transformInternal(_bounce_frac));
-                  }
+              double circScale = lerp(2.4, 1, circFrac2);
+              Color circColor = widget.backgroundColor.withAlpha(lerp(0, 255, 1 - sqrt(1 - pow(circFrac2, 2))).round());
 
-                  num iconFrac = pow(sin((_iconFrac) * pi / 2), 2); // a little smoothing at the ends
-                  num circFrac = pow(sin((_circFrac) * pi / 2), 2); // a little smoothing at the ends
+              double radius = 110 * circScale;
 
-                  double iconScale = linterpolate(1.3, 1, iconFrac);
-                  double circScale = linterpolate(2.4, 1, circFrac);
-                  Color circColor = widget.default_color.withAlpha(linterpolate(0, 255, 1 - sqrt(1 - pow(circFrac, 2))).round());
-
-                  double radius = 110 * circScale;
-
-                  bool do_clip = [CircleState.DEFAULT, CircleState.RESTORING].contains(_circle_state);
-                  List<Widget> extraStackWidgets = do_clip
-                      ? []
-                      : <Widget>[
-                          // throw opaque circle into the stack (behind) if not using to clip
-                          Align(
-                            child: CircleAvatar(
-                              backgroundColor: circColor,
-                              radius: radius,
-                            ),
-                          ),
-                        ];
-
-                  Widget unclipped_widget = LayoutBuilder(
-                    builder: (context, constraints) => Stack(
+              bool doClip = [CircleState.DEFAULT, CircleState.RESTORING].contains(_circleState);
+              return doClip
+                  ? ClipOval(
+                      clipper: CircleHoleClipper(center, radius),
+                      child: Container(
+                        color: circColor,
+                        alignment: Alignment.center,
+                        child: icon,
+                      ),
+                    )
+                  : Stack(
+                      alignment: AlignmentDirectional.center,
                       children: <Widget>[
-                        ...extraStackWidgets,
-                        Positioned(
-                          key: _childKey,
-                          left: constraints.maxWidth / 2 - widget.square_size / 2 + _drag.dx,
-                          top: constraints.maxHeight / 2 - widget.square_size / 2 + _drag.dy,
-                          child: Transform.scale(
-                            scale: iconScale,
-                            child: GestureDetector(
-                              onPanStart: _onPanStart,
-                              // onPanUpdate: already listens to mouseGlobalPosition
-                              onPanEnd: _onPanEnd,
-                              onTap: () => launchUrl(Uri.parse("https://linkedin.com/in/ReubenBeeler/")),
-                              child: MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                child: Image.asset(widget.asset_path, width: widget.square_size, height: widget.square_size, filterQuality: FilterQuality.high),
-                                // child: LayoutBuilder(
-                                //   builder: (context, constraints) {
-                                //     return Image.asset(widget.asset_path, width: widget.square_size, height: widget.square_size, filterQuality: FilterQuality.high);
-                                //   },
-                                // ),
-                              ),
-                            ),
-                          ),
+                        CircleAvatar(
+                          backgroundColor: circColor,
+                          radius: radius,
                         ),
+                        icon!,
                       ],
-                    ),
-                  );
-
-                  return !do_clip
-                      ? unclipped_widget
-                      : ClipOval(
-                          clipper: CircleHoleClipper(center, radius),
-                          child: Container(
-                            color: circColor,
-                            alignment: Alignment.center,
-                            child: unclipped_widget,
-                          ),
-                        );
-                },
-              );
+                    );
             },
+            child: ValueListenableBuilder(
+              valueListenable: _iconOffset,
+              // `Transform.translate` works instead of `Positioned` because we don't clip when we translate
+              builder: (_, offset, child) => Transform.translate(
+                key: _key,
+                offset: offset,
+                child: child,
+              ),
+              child: Center(
+                child: ValueListenableBuilder(
+                  valueListenable: _iconFraction,
+                  builder: (_, iconFrac, child) => Transform.scale(
+                    scale: lerp(1.3, 1, _smoothenFraction(iconFrac)),
+                    child: child,
+                  ),
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onPanStart: _onPanStart,
+                      onPanUpdate: _onPanUpdate,
+                      onPanEnd: _onPanEnd,
+                      child: widget.child,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -238,22 +274,4 @@ class CircleHoleClipper extends CustomClipper<Rect> {
   bool shouldReclip(covariant CircleHoleClipper oldClipper) {
     return oldClipper.radius != radius || oldClipper.center != center;
   }
-}
-
-/// Creates a curve for convergent oscillation toward the final destination. See https://www.desmos.com/calculator/hkwqeoh6gp.
-class ConOscCurve extends Curve {
-  final num a;
-  final num n;
-
-  double f(double x) => 1 - exp(-2 * a * x) * cos((pi / 2) * (2 * n - 1) * x);
-  double s(double x) => x;
-  double C(double x) => f(x) * (1 - s(x)) + s(x); // curve function
-
-  /// `n` must be integer for it to stop smoothly (derivative --> 0) at destination. Damping coefficient `a` is recommended to be `0 <= a <= 1`
-  ///
-  /// Note: `n > 0.5`. `floor(n)` is the number of times it reaches/passes the destination before it stops. For example, `n=1` will go to the destination once and stop smoothly. `n=3` will go past the destination once, come back and pass again, and then come back a 3rd time and stop smoothly. `n=2.5` will go past the destination once, come back and pass again, then come back a 3rd time for a hard stop.
-  const ConOscCurve(this.n, {this.a = 0});
-
-  @override
-  double transformInternal(double t) => C(t);
 }

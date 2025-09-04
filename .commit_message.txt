@@ -1,0 +1,3 @@
+TODOs done:
+- Create a bootstrapper loading page and animate-in the dependent components once booted.
+- AnimationCrossFade background from theme color to image at boot time to prevent jump from solid color to image (image takes time to load).

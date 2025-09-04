@@ -1,0 +1,21 @@
+## TODOs
+- Big-Picture:
+    - Design a structured view with navigation for bio, resume, social, projects, certifications, etc.
+- Minor Tweaks:
+    - Pan over the background at roughly half the rate of the foreground when scrolling (first make a scroll view!)
+    - Implement drag-and-scroll for `ReubIcon`s within a parent `Scrollable`
+    - Configure browser tab icon(s) and other similar settings
+    - Add some kind of border around `ReubIcon` spotlights (inverse primary color?)
+    - Set max speed on mouse-proximity animations to avoid spazzy UI if mouse spazzes.
+    - Embellish EXPLORE with color gradient or animation of light shining through the letters
+- Goofy Mode (make these icons feel ALIVE):
+    - long/indefinite animation times
+    - make noise on hover (louder + higher pitch closer to the center)
+    - make icon shake or spin with increasing intensity
+    - icon bouncing (some options):
+        - keep some momentum when ending drag
+        - allow icon to leave screen and regenerate it if too far gone
+        - make animation super bouncy
+        - make path follow planetary-like orbit around default position
+        - let the icons collide/bounce off each other instead of z-stacking
+        - move back along the same path traced by the mouse when dragging

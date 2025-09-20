@@ -31,6 +31,7 @@ dependencies:
   flutter:
     sdk: flutter
   url_launcher: ^6.2.2
+  staggered_grid_view: ^0.0.1
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -50,6 +51,12 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.1
+
+flutter_launcher_icons:
+  web:
+    generate: true
+    image_path: "web/icon.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -63,9 +70,20 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/original_dark_background.jpg
-    - assets/linkedin_logo.webp
+    - assets/auchanic_thumbnail.webp
+    - assets/background.jpg
+    - assets/generator_thumbnail.png
     - assets/github_logo_clean.webp
+    - assets/java_badge.png
+    - assets/keylogging_thumbnail.png
+    - assets/linkedin_circle.png
+    - assets/PAOA vs QAOA thumbnail.png
+    - assets/profile_pic.png
+    - assets/resume.webp
+    - assets/Reuben Beeler - Physics 127BL - Lab 11 Report.pdf
+    - assets/Reuben Beeler - Physics 127BL - Lab 9 and 10 Report.pdf
+    - assets/Reuben Beeler Resume.pdf
+
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

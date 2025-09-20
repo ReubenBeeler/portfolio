@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show TapGestureRecognizer;
 import 'package:flutter/material.dart';
 
 Offset getGlobalOffset(GlobalKey key) {
@@ -69,27 +70,125 @@ extension AddValueListener<T> on ValueListenable<T> {
   }
 }
 
+extension AutoDisposeChangeNotifier on ChangeNotifier {
+  void autoDispose(AnimatedState owner) {
+    owner.runOnDispose(dispose);
+  }
+}
+
 extension CommonControls on AnimationController {
   void autoDispose(AnimatedState owner) {
-    owner._controllers.add(this);
+    owner.runOnDispose(dispose);
   }
 
   /// Overwrites this.duration with duration if non-null and then runs the animation from the beginning.
-  TickerFuture start([Duration? duration]) {
+  TickerFuture restart([Duration? duration]) {
     if (duration != null) this.duration = duration;
     reset();
     return forward();
   }
 }
 
-abstract class AnimatedState<T extends StatefulWidget> extends State<T> {
-  final List<AnimationController> _controllers = [];
+abstract class AnimatedState<T extends StatefulWidget> extends State<T> implements TickerProvider {
+  bool _initialized = false;
+  bool _disposed = false;
+  final List<void Function()> _onInitStateCallbacks = [];
+  final List<void Function()> _onDisposeCallbacks = [];
+
+  void runWhenInitialized(void Function() callback) {
+    if (!_initialized) {
+      _onInitStateCallbacks.add(callback);
+    } else if (!_disposed) {
+      callback();
+    }
+  }
+
+  void runOnDispose(void Function() callback) {
+    if (!_disposed) {
+      _onDisposeCallbacks.add(callback);
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    for (void Function() callback in _onInitStateCallbacks) {
+      callback();
+    }
+    _initialized = true;
+  }
 
   @override
   void dispose() {
-    for (var controller in _controllers) {
-      controller.dispose();
+    _disposed = true;
+    for (void Function() callback in _onDisposeCallbacks) {
+      callback();
     }
     super.dispose();
+  }
+}
+
+Widget getDraggable(Widget icon) {
+  assert(icon.key is GlobalKey, "icon.key must be a Globalkey");
+  return Draggable(
+    feedback: MouseRegion(
+      cursor: SystemMouseCursors.grabbing, // TODO so fucking stupid... find a way to make this work
+      child: Builder(
+        builder: (_) => SizedBox.fromSize(
+          size: ((icon.key as GlobalKey).currentContext!.findRenderObject() as RenderBox).size,
+          child: icon,
+        ),
+      ),
+    ),
+    childWhenDragging: const SizedBox.shrink(),
+    child: MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: icon,
+    ),
+  );
+}
+
+class LinkText extends StatelessWidget {
+  final List line;
+  final TextStyle? style;
+  final TextStyle hyperlinkStyle;
+  const LinkText({
+    super.key,
+    required this.line,
+    this.style,
+    this.hyperlinkStyle = const TextStyle(
+      inherit: true,
+      color: Colors.blue,
+      decoration: TextDecoration.underline,
+      decorationColor: Colors.blue,
+    ),
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    for (var e in line) {
+      assert(e is String || e is VoidCallback, 'linkText `List line` argument should only contain `String`s or `VoidCallback`s');
+    }
+    return RichText(
+      text: TextSpan(
+        style: style,
+        children: [
+          for (int j = 0; j < line.length; ++j)
+            () {
+              var current = line[j];
+              assert(current is String, 'linkText `List line` elements must be String (with each String optionally followed by a VoidCallback)');
+              String string = line[j];
+              dynamic next = (j + 1 < line.length) ? line[j + 1] : null;
+              TextSpan ret = TextSpan(
+                text: string,
+                recognizer: next is VoidCallback ? (TapGestureRecognizer()..onTap = next) : null,
+                style: next is VoidCallback ? hyperlinkStyle : null,
+              );
+              if (next is VoidCallback) ++j;
+              return ret;
+            }(),
+        ],
+      ),
+    );
   }
 }

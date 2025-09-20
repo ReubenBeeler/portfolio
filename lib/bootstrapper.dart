@@ -84,9 +84,9 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
       // skip fade-in splash
       // _controller.start(const Duration(milliseconds: 0)).whenComplete(() {
       //   setState(() => _bootState = BootState.FLY_IN);
-      _controller.start(const Duration(milliseconds: 1000)).whenComplete(() {
+      _controller.restart(const Duration(milliseconds: 1000)).whenComplete(() {
         setState(() => _bootState = BootState.WAITING);
-        _controller.start(const Duration(milliseconds: 500)).whenComplete(() {
+        _controller.restart(const Duration(milliseconds: 500)).whenComplete(() {
           _waitedMinimum = true;
           updateWaitingState();
         });
@@ -98,7 +98,7 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
   void updateWaitingState() {
     if (allReadyButMouse) {
       setState(() => _bootState = BootState.WAITING_MOUSE_CLICK);
-      _clickTextFadeController.start(const Duration(seconds: 1));
+      _clickTextFadeController.restart(const Duration(seconds: 1));
       Future.delayed(const Duration(milliseconds: 125)).whenComplete(() {
         runOnPlatformThread(() {
           if (_bootState == BootState.WAITING_MOUSE_CLICK) {
@@ -109,9 +109,9 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
       });
     } else if (bootReady) {
       setState(() => _bootState = BootState.FLY_OUT);
-      _controller.start(const Duration(milliseconds: 1000)).whenComplete(() {
+      _controller.restart(const Duration(milliseconds: 1000)).whenComplete(() {
         setState(() => _bootState = BootState.FADE_IN);
-        _controller.start(const Duration(milliseconds: 1000)).whenComplete(() {
+        _controller.restart(const Duration(milliseconds: 1000)).whenComplete(() {
           setState(() => _bootState = BootState.BOOTED);
         });
       });
@@ -166,7 +166,7 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
                   "Click to",
                   textAlign: TextAlign.center,
                   style: GoogleFonts.roboto(
-                    color: widget.foregroundColor.withAlpha((255 * _clickTextFadeController.value).round()),
+                    color: widget.foregroundColor.withValues(alpha: _clickTextFadeController.value),
                     fontSize: 0.2 * min(screenSize.width * 0.15, screenSize.height * 0.4), // min(...) is "EXPLORE" fontSize
                     fontWeight: FontWeight.w200,
                   ),
@@ -183,11 +183,14 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
         stack = [
           AnimatedBuilder(
             animation: _controller,
-            builder: (_, _) => SizedBox.expand(child: ColoredBox(color: widget.backgroundColor.withAlpha(lerpDouble(0x00, 0xFF, _controller.value)!.round()))),
+            builder: (_, _) => SizedBox.expand(
+              child: ColoredBox(color: widget.backgroundColor.withValues(alpha: _controller.value)),
+            ),
           ),
         ];
       case BootState.FLY_IN:
       case BootState.WAITING:
+        // TODO make text larger and make like Container(margins, FittedBox)
         stack = [
           SizedBox.expand(child: ColoredBox(color: widget.backgroundColor)),
           flyingText!,
@@ -205,11 +208,13 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
         ];
       case BootState.FADE_IN:
         stack = [
-          ?widget.child, // TODO why is child icon not animating correctly when switching between fade-in and booted?
+          ?widget.child, // TODO child icon not animating correctly when switching between fade-in and booted?
           AnimatedBuilder(
             animation: _controller,
             builder: (_, _) {
-              final box = SizedBox.expand(child: ColoredBox(color: widget.backgroundColor.withAlpha(lerpDouble(0xFF, 0x00, _controller.value)!.round())));
+              final box = SizedBox.expand(
+                child: ColoredBox(color: widget.backgroundColor.withValues(alpha: 1.0 - _controller.value)),
+              );
               return _controller.value < 0.2 ? AbsorbPointer(child: box) : IgnorePointer(child: box);
             },
           ),
@@ -241,7 +246,7 @@ class FlyingText extends StatefulWidget {
   State<FlyingText> createState() => _FlyingTextState();
 }
 
-class _FlyingTextState extends AnimatedState<FlyingText> with SingleTickerProviderStateMixin {
+class _FlyingTextState extends State<FlyingText> {
   static const Curve _FLY_CURVE = ConOscCurve(2, a: 1);
 
   @override

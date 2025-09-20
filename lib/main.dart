@@ -33,7 +33,7 @@ List<MyView> views = [
   ViewCertifications(),
 ];
 final accentColor = Color(0xFF00E8F3); // Color.lerp(Color(0xFF00FFEE), Color(0xFF00B3FF), 0.3)!;
-const String background_path = "assets/background.jpg";
+const String background_path = "assets/background.webp";
 
 void main() {
   assert(views.isNotEmpty);
@@ -46,7 +46,13 @@ void main() {
       color: accentColor,
       // theme: ...
       home: Bootstrapper(
-        precache: [AssetImage(background_path)], // TODO precache other images like profile pic
+        precache: [
+          AssetImage(background_path),
+          AssetImage('assets/profile_pic.webp'),
+          AssetImage('assets/resume.webp'),
+          AssetImage('assets/linkedin_circle.webp'),
+          AssetImage('assets/github_logo_clean.webp'),
+        ], // just pre-cache images in first view
         child: Scaffold(
           key: loadKey, // to prevent re-initializing state immediately after fade-in by bootstrapper
           // appBar: AppBar(
@@ -66,58 +72,90 @@ class _ViewController extends StatefulWidget {
 
 class _ViewControllerState extends AnimatedState<_ViewController> with SingleTickerProviderStateMixin {
   // late final SmoothScroller _smoothScroller = SmoothScroller(scrollDirection: Axis.vertical, vsync: this);
-  late final ScrollController _controller = ScrollController()..addListener(_checkNavBarPosition);
-  final GlobalKey _navBarKey = GlobalKey();
-  final GlobalKey _navBarPlaceholderKey = GlobalKey();
+  late final ScrollController _controller = ScrollController()..addListener(_updateNavBarListener);
+  final GlobalKey _navBarKey = GlobalKey(); // for keeping state across switch between inline and overlay
+  final GlobalKey _inlineNavBarKey = GlobalKey();
   final GlobalKey _viewsParentKey = GlobalKey();
   final GlobalKey _firstScreenKey = GlobalKey();
+  late double _inlineNavBarHeight;
+  late double _overlayNavBarHeight;
   bool _doNavBarOverlay = false;
-  late double _minNavBarHeight;
-  double _navbarFrac = 0;
-  double? _navbarHeight;
+  double? _currentNavBarTop;
+  double? _currentNavBarHeight;
+  double _navBarFrac = 0;
 
-  void _checkNavBarPosition() {
-    RenderBox? rbHome = views.first.globalKey.currentContext?.findRenderObject() as RenderBox?;
-    RenderBox? rbFirstScreen = _firstScreenKey.currentContext?.findRenderObject() as RenderBox?;
-    RenderBox? rbNavBar = (_doNavBarOverlay ? _navBarPlaceholderKey : _navBarKey).currentContext?.findRenderObject() as RenderBox?;
-    if (rbHome != null && rbHome.hasSize) {
-      double bottomHome = rbHome.localToGlobal(Offset(0, rbHome.size.height)).dy;
-      bool doNavBarOverlay = (bottomHome < 0);
-      double? height, navbarFrac;
-      if (doNavBarOverlay && rbFirstScreen != null && rbFirstScreen.hasSize && rbNavBar != null && rbNavBar.hasSize) {
-        double bottomNavBar = rbFirstScreen.localToGlobal(Offset(0, rbFirstScreen.size.height)).dy;
-        double maxNavBarHeight = rbNavBar.size.height;
-        height = clampDouble(bottomNavBar, _minNavBarHeight, maxNavBarHeight);
-        navbarFrac = clampDouble((maxNavBarHeight - height) / (maxNavBarHeight - _minNavBarHeight), 0, 1);
-      }
-      if (_doNavBarOverlay != doNavBarOverlay || _navbarHeight != height || _navbarFrac != navbarFrac) {
+  void _updateNavBarListener() {
+    double? homeBottom = getBottomFromRenderBox(views.first.globalKey);
+    double? inlineNavBarTop = getTopFromRenderBox(_inlineNavBarKey);
+    double? screenHeight = MediaQuery.maybeHeightOf(context);
+    if (homeBottom != null && inlineNavBarTop != null && screenHeight != null) {
+      double x, minHeight, maxHeight;
+      // if (_inlineNavBarHeight < _overlayNavBarHeight) {
+      //   // expand once inline navbar leaves floor
+      //   x = screenHeight - homeBottom;
+      //   minHeight = _inlineNavBarHeight;
+      //   maxHeight = _overlayNavBarHeight;
+      // }
+      assert(_overlayNavBarHeight < _inlineNavBarHeight);
+      // shrink once inline navbar hits ceiling
+      x = inlineNavBarTop + _inlineNavBarHeight; // inlineNavBarBottom
+      minHeight = _overlayNavBarHeight;
+      maxHeight = _inlineNavBarHeight;
+
+      bool doNavBarOverlay = homeBottom < 0; // _controller.position.hasPixels && _controller.position.pixels > 0;
+      double currentNavBarTop = max(inlineNavBarTop, 0.0);
+      double currentNavBarHeight = clampDouble(x, minHeight, maxHeight);
+      double navBarFrac = clampDouble((maxHeight - x) / (maxHeight - minHeight), 0, 1);
+
+      if (_doNavBarOverlay != doNavBarOverlay || _currentNavBarTop != currentNavBarTop || _currentNavBarHeight != currentNavBarHeight || _navBarFrac != navBarFrac) {
         WidgetsBinding.instance.addPostFrameCallback(
           (_) => setState(() {
             _doNavBarOverlay = doNavBarOverlay;
-            _navbarHeight = height;
-            _navbarFrac = navbarFrac ?? 0;
+            _currentNavBarTop = currentNavBarTop;
+            _currentNavBarHeight = currentNavBarHeight;
+            _navBarFrac = navBarFrac;
           }),
-        );
+        ); // TODO replace with listenables
       }
     }
+    // RenderBox? rbHome = views.first.globalKey.currentContext?.findRenderObject() as RenderBox?;
+    // RenderBox? rbFirstScreen = _firstScreenKey.currentContext?.findRenderObject() as RenderBox?;
+    // RenderBox? rbNavBar = _inlineNavBarKey.currentContext?.findRenderObject() as RenderBox?;
+    // if (rbHome != null && rbHome.hasSize) {
+    //   double bottomHome = rbHome.localToGlobal(Offset(0, rbHome.size.height)).dy;
+    //   bool doNavBarOverlay = (bottomHome < 0);
+    //   double? height, navbarFrac;
+    //   if (doNavBarOverlay && rbFirstScreen != null && rbFirstScreen.hasSize && rbNavBar != null && rbNavBar.hasSize) {
+    //     double bottomNavBar = rbFirstScreen.localToGlobal(Offset(0, rbFirstScreen.size.height)).dy;
+    //     double maxNavBarHeight = rbNavBar.size.height;
+    //     height = clampDouble(bottomNavBar, _overlayNavBarHeight, maxNavBarHeight);
+    //     navbarFrac = clampDouble((maxNavBarHeight - height) / (maxNavBarHeight - _overlayNavBarHeight), 0, 1);
+    //   }
+    //   if (_doNavBarOverlay != doNavBarOverlay || _currentNavBarHeight != height || _navBarFrac != navbarFrac) {
+    //     WidgetsBinding.instance.addPostFrameCallback(
+    //       (_) => setState(() {
+    //         _doNavBarOverlay = doNavBarOverlay;
+    //         _currentNavBarHeight = height;
+    //         _navBarFrac = navbarFrac ?? 0;
+    //       }),
+    //     );
+    //   }
+    // }
   }
 
   @override
   Widget build(BuildContext context) {
-    Size screenSize = MediaQuery.of(context).size;
-    _minNavBarHeight = 0.10 * screenSize.height;
-    double scale = min(0.9 * screenSize.width * 0.15, screenSize.height * 0.4) / 220.5; // match ViewHome
+    Size screenSize = MediaQuery.sizeOf(context);
+    _inlineNavBarHeight = 0.20 * screenSize.height;
+    _overlayNavBarHeight = 0.10 * screenSize.height;
 
-    double view1Padding = 0.05 * screenSize.height - 4 * scale;
     final navBar = NavBar(
       key: _navBarKey,
-      overlayRestHeight: _minNavBarHeight,
-      preferredHeight: _navbarHeight,
+      overlayRestHeight: _overlayNavBarHeight,
       isActive: _doNavBarOverlay,
-      navbarFrac: _navbarFrac,
+      navbarFrac: _navBarFrac,
       controller: _controller,
       viewsParentKey: _viewsParentKey,
-      view1Padding: view1Padding,
     );
 
     final footerHeight = 0.08 * screenSize.height;
@@ -130,8 +168,14 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
             height: screenSize.height,
             child: Column(
               children: [
-                views[i],
-                _doNavBarOverlay ? Spacer(key: _navBarPlaceholderKey) : Expanded(child: navBar),
+                Expanded(
+                  child: views[i],
+                ),
+                SizedBox(
+                  key: _inlineNavBarKey,
+                  height: _inlineNavBarHeight,
+                  child: _doNavBarOverlay ? null : navBar,
+                ),
               ],
             ),
           ),
@@ -142,7 +186,7 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
       } else {
         scrollContent.add(
           ConstrainedBox(
-            constraints: BoxConstraints(minHeight: screenSize.height - _minNavBarHeight - footerHeight),
+            constraints: BoxConstraints(minHeight: screenSize.height - _overlayNavBarHeight - footerHeight),
             child: views[i],
           ),
         );
@@ -168,27 +212,28 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
             interactive: true,
             child: SingleChildScrollView(
               controller: _controller, //_smoothScroller.controller,
-              physics: const ClampingScrollPhysics(), // BouncingScrollPhysics(), // _smoothScroller.physics,
+              // physics: const ClampingScrollPhysics(), // BouncingScrollPhysics(), // _smoothScroller.physics,
               child: Column(
                 children: [
                   ParallaxScroller(
                     parallaxRatio: 0.2,
-                    // getScrollLength: (context, _) => (0.95 * screenSize.height + 4 * scale + (1 * 0.85 + 0.15 + 0.85 + 0.15 + 0.85 + 0.15 + 0.85) * screenSize.height), // manually put Column size here cuz Flutter is lame
-                    // getScrollViewLength: (context, _) => screenSize.height,
                     background: Image.asset(
                       background_path,
                       fit: BoxFit.fill,
                       filterQuality: FilterQuality.high,
                     ),
-                    child: Column(
-                      key: _viewsParentKey,
-                      children: scrollContent,
+                    child: SizedBox(
+                      width: screenSize.width,
+                      child: Column(
+                        key: _viewsParentKey,
+                        children: scrollContent,
+                      ),
                     ),
                   ),
                   Container(
                     height: footerHeight,
                     color: const Color(0xFF4E423F),
-                    padding: EdgeInsets.fromLTRB(10, 0, 0, 0),
+                    padding: EdgeInsets.only(left: 20.0),
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: LinkText(
@@ -200,20 +245,16 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
                 ],
               ),
             ),
-            // body: Stack(
-            //   children: [
-            //     SizedBox.expand(
-            //       child: Image.asset(
-            //         background_path,
-            //         fit: BoxFit.fill,
-            //         filterQuality: FilterQuality.high,
-            //       ),
-            //     ),
-            //     ViewHome(),
-            //   ],
           ),
         ),
-        if (_doNavBarOverlay) navBar,
+        if (_doNavBarOverlay)
+          Positioned(
+            left: 0.0,
+            width: screenSize.width,
+            top: _currentNavBarTop,
+            height: _currentNavBarHeight,
+            child: navBar,
+          ),
       ],
     );
   }
@@ -221,21 +262,19 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
 
 class NavBar extends StatefulWidget {
   final double overlayRestHeight;
-  final double? preferredHeight;
   final bool isActive;
   final double navbarFrac;
   final ScrollController controller;
   final GlobalKey viewsParentKey;
-  final double view1Padding;
 
-  const NavBar({super.key, required this.overlayRestHeight, required this.preferredHeight, required this.isActive, required this.navbarFrac, required this.controller, required this.viewsParentKey, required this.view1Padding});
+  const NavBar({super.key, required this.overlayRestHeight, required this.isActive, required this.navbarFrac, required this.controller, required this.viewsParentKey});
 
   @override
   State<StatefulWidget> createState() => _NavBarState();
 }
 
+// TODO when switching between inline and overlay, NavBar gets a new state! Prevent this from happening...
 class _NavBarState extends AnimatedState<NavBar> with TickerProviderStateMixin {
-  final GlobalKey _key = GlobalKey();
   int? _prevActiveIndex = 0; // just to be same as _activeIndex at start
   int? _activeIndex = 0;
   int? _clickedIndex;
@@ -251,24 +290,23 @@ class _NavBarState extends AnimatedState<NavBar> with TickerProviderStateMixin {
   final _clickedColor = const Color(0xFFFFCE3D);
 
   // TODO override all `jump to`s with animateTo (for mouse scrolling)
-  void _animateTo(BuildContext context, GlobalKey viewKey, int index) {
+  void _animateTo(BuildContext context, GlobalKey viewKey) {
     final screenHeight = MediaQuery.of(context).size.height;
     final rbView = viewKey.currentContext!.findRenderObject() as RenderBox;
     final rbParent = widget.viewsParentKey.currentContext!.findRenderObject() as RenderBox;
     double targetOffset = rbView.localToGlobal(Offset.zero, ancestor: rbParent).dy - widget.overlayRestHeight;
-    // if (index == 1) targetOffset -= view1Padding;
     var position = widget.controller.position;
     targetOffset = clampDouble(targetOffset, position.minScrollExtent, position.maxScrollExtent); // controller.animateTo automatically does this but I want to ensure duration is updated too
     widget.controller.animateTo(
       targetOffset,
-      duration: Duration(milliseconds: (700 * sqrt(((targetOffset - widget.controller.position.pixels) / screenHeight).abs())).round()),
+      duration: Duration(milliseconds: (700 * sqrt(((targetOffset - widget.controller.position.pixels) / screenHeight).abs())).round()), // TODO set max time of e.g. 1 second
       curve: Curves.easeInOut,
     );
   }
 
-  void listener() {
-    var bc = views.firstOrNull?.globalKey.currentContext;
-    double? screenHeight = bc != null ? MediaQuery.maybeHeightOf(bc) : null;
+  void _whichActiveListener() {
+    var context = views.firstOrNull?.globalKey.currentContext;
+    double? screenHeight = context != null ? MediaQuery.maybeHeightOf(context) : null;
     assert(screenHeight != null, 'help! screenHeight == null');
     if (screenHeight == null) return;
     double middleScreen = screenHeight / 2;
@@ -296,12 +334,12 @@ class _NavBarState extends AnimatedState<NavBar> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    widget.controller.addListener(listener);
+    widget.controller.addListener(_whichActiveListener);
   }
 
   @override
   void dispose() {
-    widget.controller.removeListener(listener);
+    widget.controller.removeListener(_whichActiveListener);
     super.dispose();
   }
 
@@ -337,7 +375,7 @@ class _NavBarState extends AnimatedState<NavBar> with TickerProviderStateMixin {
               _clickedIndex = i;
               _clickedColorController.forward();
               // I want to set _clickedIndex = null at end of animation but user may click same button multiple times in a row, and this actually works just fine because end of animation effectively ignores _clickedIndex anyway
-              _animateTo(context, views[i].globalKey, i);
+              _animateTo(context, views[i].globalKey);
             },
             child: AnimatedBuilder(
               animation: _listenable,
@@ -400,29 +438,20 @@ class _NavBarState extends AnimatedState<NavBar> with TickerProviderStateMixin {
       },
     ).toList();
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        double height = min(widget.preferredHeight ?? double.infinity, constraints.maxHeight);
-        return SizedBox(
-          key: _key,
-          height: height,
-          child: Align(
-            alignment: Alignment.topCenter,
-            child: FractionallySizedBox(
-              alignment: Alignment.topCenter,
-              widthFactor: 0.9, // match ViewHome
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Color.lerp(Colors.black.withValues(alpha: 0.5), Colors.black, widget.navbarFrac)!,
-                ),
-                child: Row(
-                  children: buttons.map((button) => Expanded(child: button)).toList(),
-                ),
-              ),
-            ),
+    return Align(
+      alignment: Alignment.topCenter,
+      child: FractionallySizedBox(
+        alignment: Alignment.topCenter,
+        widthFactor: 0.9, // match ViewHome
+        child: Container(
+          decoration: BoxDecoration(
+            color: Color.lerp(Colors.black.withValues(alpha: 0.5), Colors.black, widget.navbarFrac)!,
           ),
-        );
-      },
+          child: Row(
+            children: buttons.map((button) => Expanded(child: button)).toList(),
+          ),
+        ),
+      ),
     );
   }
 }

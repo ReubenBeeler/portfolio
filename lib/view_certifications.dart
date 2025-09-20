@@ -18,7 +18,7 @@ class ViewCertifications extends StatelessView {
             child: SizedBox(
               height: 0.50 * screenSize.height,
               child: IconButton(
-                icon: Image.asset("assets/java_badge.png"),
+                icon: Image.asset("assets/java_badge.webp"),
                 onPressed: () => launchUrl(Uri.parse("https://www.credly.com/badges/d2f3e39d-df46-4e1d-af16-4c3aae7bcbda/public_url")),
               ), // make a gridview once I have more...
             ),

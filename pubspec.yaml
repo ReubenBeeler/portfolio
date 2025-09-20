@@ -71,18 +71,15 @@ flutter:
 
   assets:
     - assets/auchanic_thumbnail.webp
-    - assets/background.jpg
-    - assets/generator_thumbnail.png
+    - assets/background.webp
+    - assets/generator_thumbnail.webp
     - assets/github_logo_clean.webp
-    - assets/java_badge.png
-    - assets/keylogging_thumbnail.png
-    - assets/linkedin_circle.png
-    - assets/PAOA vs QAOA thumbnail.png
-    - assets/profile_pic.png
+    - assets/java_badge.webp
+    - assets/keylogging_thumbnail.webp
+    - assets/linkedin_circle.webp
+    - assets/PAOA vs QAOA thumbnail.webp
+    - assets/profile_pic.webp
     - assets/resume.webp
-    - assets/Reuben Beeler - Physics 127BL - Lab 11 Report.pdf
-    - assets/Reuben Beeler - Physics 127BL - Lab 9 and 10 Report.pdf
-    - assets/Reuben Beeler Resume.pdf
 
 
   # An image asset can refer to one or more resolution-specific "variants", see

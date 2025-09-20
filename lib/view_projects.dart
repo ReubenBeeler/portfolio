@@ -30,7 +30,7 @@ class ViewProjects extends StatelessView {
             child: ThumbnailLinkItem(
               title: 'PAOA vs. QAOA, an optimizer benchmarker on SK Ising models',
               linkUrl: null, // 'https://github.com/ReubenBeeler/PAOA-vs-QAOA',
-              image: AssetImage('assets/PAOA vs QAOA thumbnail.png'),
+              image: AssetImage('assets/PAOA vs QAOA thumbnail.webp'),
             ),
           ),
           const SizedBox(height: 20),
@@ -39,7 +39,7 @@ class ViewProjects extends StatelessView {
             child: ThumbnailLinkItem(
               title: 'Bike-Generator, a plug-and-play generator for ordinary bikes',
               linkUrl: 'https://github.com/ReubenBeeler/Bike-Generator',
-              image: AssetImage('assets/generator_thumbnail.png'),
+              image: AssetImage('assets/generator_thumbnail.webp'),
             ),
           ),
           // const SizedBox(height: 20),

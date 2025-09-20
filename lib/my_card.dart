@@ -35,7 +35,7 @@ class MyCard extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), // TODO fix no-blur at end of scrollview on mobile web
           child: Container(
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.25),

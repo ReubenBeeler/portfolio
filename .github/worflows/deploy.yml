@@ -1,0 +1,39 @@
+name: Deploy Flutter Web to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: 'stable'
+
+    - name: Enable web
+      run: flutter config --enable-web
+
+    - name: Install dependencies
+      run: flutter pub get
+
+    - name: Build Flutter web (WASM)
+      run: flutter build web --release --wasm
+
+    - name: Copy CNAME
+      run: cp CNAME build/web/
+
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v4
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: build/web
+        destination_dir: ""
+        force_orphan: true

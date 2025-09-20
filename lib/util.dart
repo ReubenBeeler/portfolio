@@ -192,3 +192,24 @@ class LinkText extends StatelessWidget {
     );
   }
 }
+
+extension SizeOrNull on RenderBox {
+  Size? get sizeOrNull {
+    if (!hasSize) return null;
+    try {
+      return size;
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+double? getTopFromRenderBox(GlobalKey key) {
+  RenderBox? box = key.currentContext?.findRenderObject() as RenderBox?;
+  return box != null && box.hasSize ? box.localToGlobal(Offset.zero).dy : null;
+}
+
+double? getBottomFromRenderBox(GlobalKey key) {
+  RenderBox? box = key.currentContext?.findRenderObject() as RenderBox?;
+  return box != null && box.hasSize ? box.localToGlobal(Offset(0, box.size.height)).dy : null;
+}

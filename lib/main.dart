@@ -118,29 +118,6 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
         ); // TODO replace with listenables
       }
     }
-    // RenderBox? rbHome = views.first.globalKey.currentContext?.findRenderObject() as RenderBox?;
-    // RenderBox? rbFirstScreen = _firstScreenKey.currentContext?.findRenderObject() as RenderBox?;
-    // RenderBox? rbNavBar = _inlineNavBarKey.currentContext?.findRenderObject() as RenderBox?;
-    // if (rbHome != null && rbHome.hasSize) {
-    //   double bottomHome = rbHome.localToGlobal(Offset(0, rbHome.size.height)).dy;
-    //   bool doNavBarOverlay = (bottomHome < 0);
-    //   double? height, navbarFrac;
-    //   if (doNavBarOverlay && rbFirstScreen != null && rbFirstScreen.hasSize && rbNavBar != null && rbNavBar.hasSize) {
-    //     double bottomNavBar = rbFirstScreen.localToGlobal(Offset(0, rbFirstScreen.size.height)).dy;
-    //     double maxNavBarHeight = rbNavBar.size.height;
-    //     height = clampDouble(bottomNavBar, _overlayNavBarHeight, maxNavBarHeight);
-    //     navbarFrac = clampDouble((maxNavBarHeight - height) / (maxNavBarHeight - _overlayNavBarHeight), 0, 1);
-    //   }
-    //   if (_doNavBarOverlay != doNavBarOverlay || _currentNavBarHeight != height || _navBarFrac != navbarFrac) {
-    //     WidgetsBinding.instance.addPostFrameCallback(
-    //       (_) => setState(() {
-    //         _doNavBarOverlay = doNavBarOverlay;
-    //         _currentNavBarHeight = height;
-    //         _navBarFrac = navbarFrac ?? 0;
-    //       }),
-    //     );
-    //   }
-    // }
   }
 
   @override

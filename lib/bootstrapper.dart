@@ -194,6 +194,7 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
         stack = [
           SizedBox.expand(child: ColoredBox(color: widget.backgroundColor)),
           flyingText!,
+          // TODO add "Loading..." in WAITING state
         ];
       case BootState.WAITING_MOUSE_CLICK:
         stack = [

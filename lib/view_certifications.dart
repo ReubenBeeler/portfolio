@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:portfolio/my_view.dart';
 import 'package:url_launcher/url_launcher.dart';

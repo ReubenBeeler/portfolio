@@ -25,7 +25,7 @@ class ViewBio extends StatelessView with MyView {
                       borderRadius: BorderRadius.circular(10),
                       border: BoxBorder.all(color: accentColor),
                       image: DecorationImage(
-                        image: AssetImage("assets/bio_pic.jpeg"),
+                        image: NetworkImage("assets/bio_pic.jpeg"),
                         fit: BoxFit.cover,
                       ),
                     ),

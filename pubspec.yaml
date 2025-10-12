@@ -69,17 +69,17 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  assets:
-    - assets/auchanic_thumbnail.webp
-    - assets/background.webp
-    - assets/generator_thumbnail.webp
-    - assets/github_logo_clean.webp
-    - assets/java_badge.webp
-    - assets/keylogging_thumbnail.webp
-    - assets/linkedin_circle.webp
-    - assets/PAOA vs QAOA thumbnail.webp
-    - assets/profile_pic.webp
-    - assets/resume.webp
+  # assets:
+    # - assets/auchanic_thumbnail.webp
+    # - assets/background.webp
+    # - assets/generator_thumbnail.webp
+    # - assets/github_logo_clean.webp
+    # - assets/java_badge.webp
+    # - assets/keylogging_thumbnail.webp
+    # - assets/linkedin_circle.webp
+    # - assets/PAOA vs QAOA thumbnail.webp
+    # - assets/profile_pic.webp
+    # - assets/resume.webp
 
 
   # An image asset can refer to one or more resolution-specific "variants", see

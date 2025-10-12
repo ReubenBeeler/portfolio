@@ -46,12 +46,25 @@ void main() {
       color: accentColor,
       // theme: ...
       home: Bootstrapper(
+        // TODO remove pubspec.yaml assets and load from web/ so that Bootstrapper animation runs while we load assets instead of waiting until app + assets bundle is loaded
         precache: [
-          AssetImage(background_path),
-          AssetImage('assets/profile_pic.webp'),
-          AssetImage('assets/resume.webp'),
-          AssetImage('assets/linkedin_circle.webp'),
-          AssetImage('assets/github_logo_clean.webp'),
+          // AssetImage(background_path),
+          // AssetImage('assets/profile_pic.webp'),
+          // AssetImage('assets/resume.webp'),
+          // AssetImage('assets/linkedin_circle.webp'),
+          // AssetImage('assets/github_logo_clean.webp'),
+          // maybe don't pre-cache all?
+          NetworkImage('assets/auchanic_thumbnail.webp'),
+          NetworkImage('assets/background.webp'),
+          NetworkImage('assets/compass_thumbnail.webp'),
+          NetworkImage('assets/generator_thumbnail.webp'),
+          NetworkImage('assets/github_logo_clean.webp'),
+          NetworkImage('assets/java_badge.webp'),
+          NetworkImage('assets/keylogging_thumbnail.webp'),
+          NetworkImage('assets/linkedin_circle.webp'),
+          NetworkImage('assets/PAOA vs QAOA thumbnail.webp'),
+          NetworkImage('assets/profile_pic.webp'),
+          NetworkImage('assets/resume.webp'),
         ], // just pre-cache images in first view
         child: Scaffold(
           key: loadKey, // to prevent re-initializing state immediately after fade-in by bootstrapper
@@ -194,7 +207,7 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
                 children: [
                   ParallaxScroller(
                     parallaxRatio: 0.2,
-                    background: Image.asset(
+                    background: Image.network(
                       background_path,
                       fit: BoxFit.fill,
                       filterQuality: FilterQuality.high,

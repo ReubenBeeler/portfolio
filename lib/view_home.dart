@@ -57,7 +57,7 @@ class ViewHome extends StatelessView {
                                 ),
                               ),
                               Text(
-                                "Full-Stack Software Engineer",
+                                "DevOps Engineer",
                                 style: GoogleFonts.roboto(
                                   color: accentColor,
                                   fontSize: 50,
@@ -100,7 +100,7 @@ class ViewHome extends StatelessView {
                         shape: BoxShape.circle,
                         border: BoxBorder.all(color: accentColor, width: 4),
                       ),
-                      child: Image.asset('assets/profile_pic.webp', width: ppCircleDiameter - 8, height: ppCircleDiameter - 8), // 4px outline to match rest of dividers
+                      child: Image.network('assets/profile_pic.webp', width: ppCircleDiameter - 8, height: ppCircleDiameter - 8), // 4px outline to match rest of dividers
                     ),
                     // Center(
                     //   child: ClipOval(
@@ -109,7 +109,7 @@ class ViewHome extends StatelessView {
                     //       height: ppCircleDiameter,
                     //       color: accentColor,
                     //       child: Center(
-                    //         child: Image.asset(
+                    //         child: Image.network(
                     //           "assets/profile_pic.webp",
                     //           width: ppCircleDiameter - 8, // 4px outline to match rest of dividers
                     //         ),
@@ -179,9 +179,9 @@ class ViewHome extends StatelessView {
 
                             return Stack(
                               children: [
-                                buildCircle(resumeOffset, resumeKey, "Resume", () => window.open("static/Reuben Beeler Resume.pdf", "_blank"), AssetImage("assets/resume.webp")), // make accentColor border programmatically
-                                buildCircle(linkedinOffset, linkedinKey, "LinkedIn", () => launchUrl(Uri.parse("https://linkedin.com/in/ReubenBeeler/")), AssetImage("assets/linkedin_circle.webp")),
-                                buildCircle(githubOffset, githubKey, "Github", () => launchUrl(Uri.parse("https://github.com/ReubenBeeler/")), AssetImage("assets/github_logo_clean.webp")),
+                                buildCircle(resumeOffset, resumeKey, "Resume", () => window.open("static/Reuben Beeler Resume.pdf", "_blank"), NetworkImage("assets/resume.webp")), // make accentColor border programmatically
+                                buildCircle(linkedinOffset, linkedinKey, "LinkedIn", () => launchUrl(Uri.parse("https://linkedin.com/in/ReubenBeeler/")), NetworkImage("assets/linkedin_circle.webp")),
+                                buildCircle(githubOffset, githubKey, "Github", () => launchUrl(Uri.parse("https://github.com/ReubenBeeler/")), NetworkImage("assets/github_logo_clean.webp")),
                               ],
                             );
                           },

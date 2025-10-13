@@ -1,4 +1,4 @@
-name: Build (Deploy?) Flutter Web to GitHub Pages
+name: Build Flutter Web and Deploy on push to GitHub Pages
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  build-and-deploy-on-push:
     runs-on: ubuntu-latest
 
     steps:

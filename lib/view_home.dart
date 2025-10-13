@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:portfolio/my_view.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:web/web.dart' show window;
 
 import 'package:portfolio/main.dart' show accentColor;
 
@@ -57,7 +56,7 @@ class ViewHome extends StatelessView {
                                 ),
                               ),
                               Text(
-                                "DevOps Engineer",
+                                "DevOps Software Engineer",
                                 style: GoogleFonts.roboto(
                                   color: accentColor,
                                   fontSize: 50,
@@ -102,21 +101,6 @@ class ViewHome extends StatelessView {
                       ),
                       child: Image.network('assets/profile_pic.webp', width: ppCircleDiameter - 8, height: ppCircleDiameter - 8), // 4px outline to match rest of dividers
                     ),
-                    // Center(
-                    //   child: ClipOval(
-                    //     child: Container(
-                    //       width: ppCircleDiameter,
-                    //       height: ppCircleDiameter,
-                    //       color: accentColor,
-                    //       child: Center(
-                    //         child: Image.network(
-                    //           "assets/profile_pic.webp",
-                    //           width: ppCircleDiameter - 8, // 4px outline to match rest of dividers
-                    //         ),
-                    //       ),
-                    //     ),
-                    //   ),
-                    // ),
                     SizedBox(width: 0.02 * contentSize.width, height: 0.01 * contentSize.height),
                     Expanded(
                       child: FractionallySizedBox(
@@ -124,35 +108,42 @@ class ViewHome extends StatelessView {
                         child: LayoutBuilder(
                           builder: (context, constraints) {
                             double radius;
-                            Offset resumeOffset, linkedinOffset, githubOffset;
-                            if (constraints.maxWidth < 1.7 * constraints.maxHeight) {
-                              // stack icons into triangle
-                              radius = min(constraints.maxWidth / 4, constraints.maxHeight / (2 + sqrt(3)));
+                            Offset linkedinOffset, githubOffset;
+                            // if (constraints.maxWidth < 1.7 * constraints.maxHeight) {
+                            //   // stack icons into triangle
+                            //   radius = min(constraints.maxWidth / 4, constraints.maxHeight / (2 + sqrt(3)));
 
-                              final centerOfCirles = Offset(
-                                constraints.maxWidth / 2,
-                                constraints.maxHeight / 2 + radius * (2 + sqrt(3)) / 2 - radius * (1 + 1 / sqrt(3)),
-                              ); // center of circles is radius*(1 + 1/sqrt(3)) above bottom
+                            //   final centerOfCirles = Offset(
+                            //     constraints.maxWidth / 2,
+                            //     constraints.maxHeight / 2 + radius * (2 + sqrt(3)) / 2 - radius * (1 + 1 / sqrt(3)),
+                            //   ); // center of circles is radius*(1 + 1/sqrt(3)) above bottom
 
-                              final distFromCenter = (2 / sqrt(3)) * radius; // to each circle's center
+                            //   final distFromCenter = (2 / sqrt(3)) * radius; // to each circle's center
 
-                              final circleCenterToTop = Offset(-radius, -radius);
+                            //   final circleCenterToTop = Offset(-radius, -radius);
 
-                              final rightAlignInsteadOfCenter = Offset((constraints.maxWidth - 4 * radius) / 2, 0);
-                              final align = isRow ? rightAlignInsteadOfCenter : Offset.zero;
+                            //   final rightAlignInsteadOfCenter = Offset((constraints.maxWidth - 4 * radius) / 2, 0);
+                            //   final align = isRow ? rightAlignInsteadOfCenter : Offset.zero;
 
-                              resumeOffset = centerOfCirles + (Offset(0, -1) * distFromCenter) + circleCenterToTop + align;
-                              linkedinOffset = centerOfCirles + (Offset(-sqrt(3) / 2, 1 / 2) * distFromCenter) + circleCenterToTop + align;
-                              githubOffset = centerOfCirles + (Offset(sqrt(3) / 2, 1 / 2) * distFromCenter) + circleCenterToTop + align;
-                            } else {
-                              radius = min(constraints.maxWidth / 6, constraints.maxHeight / 2);
-                              final centerInsteadOfRightAlign = Offset(-(constraints.maxWidth - 6 * radius) / 2, 0);
-                              final align = isRow ? Offset.zero : centerInsteadOfRightAlign;
+                            //   resumeOffset = centerOfCirles + (Offset(0, -1) * distFromCenter) + circleCenterToTop + align;
+                            //   linkedinOffset = centerOfCirles + (Offset(-sqrt(3) / 2, 1 / 2) * distFromCenter) + circleCenterToTop + align;
+                            //   githubOffset = centerOfCirles + (Offset(sqrt(3) / 2, 1 / 2) * distFromCenter) + circleCenterToTop + align;
+                            // } else {
+                            //   radius = min(constraints.maxWidth / 6, constraints.maxHeight / 2);
+                            //   final centerInsteadOfRightAlign = Offset(-(constraints.maxWidth - 6 * radius) / 2, 0);
+                            //   final align = isRow ? Offset.zero : centerInsteadOfRightAlign;
 
-                              resumeOffset = Offset(constraints.maxWidth - 6 * radius, constraints.maxHeight / 2 - radius) + align;
-                              linkedinOffset = Offset(constraints.maxWidth - 4 * radius, constraints.maxHeight / 2 - radius) + align;
-                              githubOffset = Offset(constraints.maxWidth - 2 * radius, constraints.maxHeight / 2 - radius) + align;
-                            }
+                            //   resumeOffset = Offset(constraints.maxWidth - 6 * radius, constraints.maxHeight / 2 - radius) + align;
+                            //   linkedinOffset = Offset(constraints.maxWidth - 4 * radius, constraints.maxHeight / 2 - radius) + align;
+                            //   githubOffset = Offset(constraints.maxWidth - 2 * radius, constraints.maxHeight / 2 - radius) + align;
+                            // }
+
+                            radius = min(constraints.maxWidth / 4, constraints.maxHeight / 2);
+                            final centerInsteadOfRightAlign = Offset(-(constraints.maxWidth - 4 * radius) / 2, 0);
+                            final align = isRow ? Offset.zero : centerInsteadOfRightAlign;
+
+                            linkedinOffset = Offset(constraints.maxWidth - 4 * radius, constraints.maxHeight / 2 - radius) + align;
+                            githubOffset = Offset(constraints.maxWidth - 2 * radius, constraints.maxHeight / 2 - radius) + align;
 
                             Widget buildCircle(Offset pos, GlobalKey key, String tooltip, VoidCallback onTap, ImageProvider imageProvider) {
                               return Positioned(
@@ -179,7 +170,7 @@ class ViewHome extends StatelessView {
 
                             return Stack(
                               children: [
-                                buildCircle(resumeOffset, resumeKey, "Resume", () => window.open("static/Reuben Beeler Resume.pdf", "_blank"), NetworkImage("assets/resume.webp")), // make accentColor border programmatically
+                                // buildCircle(resumeOffset, resumeKey, "Resume", () => window.open("static/Reuben Beeler Resume.pdf", "_blank"), NetworkImage("assets/resume.webp")), // make accentColor border programmatically
                                 buildCircle(linkedinOffset, linkedinKey, "LinkedIn", () => launchUrl(Uri.parse("https://linkedin.com/in/ReubenBeeler/")), NetworkImage("assets/linkedin_circle.webp")),
                                 buildCircle(githubOffset, githubKey, "Github", () => launchUrl(Uri.parse("https://github.com/ReubenBeeler/")), NetworkImage("assets/github_logo_clean.webp")),
                               ],

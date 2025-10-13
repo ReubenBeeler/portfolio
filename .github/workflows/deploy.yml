@@ -25,8 +25,8 @@ jobs:
     - name: Install Flutter dependencies
       run: flutter pub get
 
-    - name: Build Flutter web (WASM)
-      run: flutter build web --release --wasm
+    - name: Build Flutter web
+      run: flutter build web --release
 
     - name: Copy CNAME
       run: cp CNAME build/web/

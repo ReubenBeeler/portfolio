@@ -24,7 +24,7 @@ class ViewSkills extends StatelessView {
               'CI/CD: OpenShift, Github Actions',
               'IaC: Tekton, Terraform, CloudFormation',
               'TDD/BDD: xUnit, nosetests, Behave',
-              'Monitoring & Observability: Prometheus, CloudWatch',
+              'Monitoring: Prometheus, CloudWatch',
               // Include/learn Elasticsearch & stacks like Elastic/ELK?
             ],
           ),

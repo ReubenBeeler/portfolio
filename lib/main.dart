@@ -9,7 +9,6 @@ import 'package:portfolio/view_certifications.dart';
 import 'package:portfolio/view_home.dart';
 import 'package:portfolio/util.dart';
 import 'package:portfolio/view_projects.dart';
-import 'package:portfolio/view_publications.dart';
 import 'package:portfolio/view_skills.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -28,7 +27,7 @@ import 'package:url_launcher/url_launcher.dart';
 List<MyView> views = [
   ViewHome(),
   ViewProjects(),
-  ViewPublications(),
+  // ViewPublications(),
   ViewSkills(),
   ViewCertifications(),
 ];

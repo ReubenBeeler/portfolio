@@ -1,4 +1,5 @@
 # Portfolio
+[![Build and Deploy to GitHub Pages](https://github.com/ReubenBeeler/portfolio/actions/workflows/workflow.yml/badge.svg)](https://github.com/ReubenBeeler/portfolio/actions/workflows/workflow.yml)
 
 A Flutter web application showcasing my technical projects and experience. Live at [reubenbeeler.me](https://reubenbeeler.me).
 

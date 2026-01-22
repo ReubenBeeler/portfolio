@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:portfolio/my_view.dart';
-import 'package:portfolio/view_certifications.dart';
-import 'package:portfolio/view_home.dart';
-import 'package:portfolio/view_projects.dart';
-import 'package:portfolio/view_publications.dart';
-import 'package:portfolio/view_skills.dart';
+import 'package:portfolio/widgets/my_view.dart';
+import 'package:portfolio/views/view_certifications.dart';
+import 'package:portfolio/views/view_home.dart';
+import 'package:portfolio/views/view_projects.dart';
+import 'package:portfolio/views/view_publications.dart';
+import 'package:portfolio/views/view_skills.dart';
 
 List<MyView> views = [
   ViewHome(), //           navbar Size(58.0, 77.0)

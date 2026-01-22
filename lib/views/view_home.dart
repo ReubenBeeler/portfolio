@@ -2,7 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:portfolio/my_view.dart';
+import 'package:portfolio/widgets/my_view.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:portfolio/main.dart' show accentColor;

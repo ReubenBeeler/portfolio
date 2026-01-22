@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:portfolio/skills_section.dart';
-import 'package:portfolio/my_view.dart';
+import 'package:portfolio/widgets/skills_section.dart';
+import 'package:portfolio/widgets/my_view.dart';
 import 'package:url_launcher/url_launcher.dart' show launchUrl;
 import 'package:web/web.dart' show window;
 

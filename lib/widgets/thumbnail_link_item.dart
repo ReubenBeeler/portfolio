@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:portfolio/main.dart';
-import 'package:portfolio/my_card.dart';
+import 'package:portfolio/widgets/my_card.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 void main() {

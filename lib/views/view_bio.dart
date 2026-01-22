@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:portfolio/main.dart';
-import 'package:portfolio/my_view.dart';
+import 'package:portfolio/widgets/my_view.dart';
 
 class ViewBio extends StatelessView with MyView {
   final Size size;

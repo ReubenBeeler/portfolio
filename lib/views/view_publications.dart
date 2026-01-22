@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:portfolio/my_view.dart';
-import 'package:portfolio/thumbnail_link_item.dart';
+import 'package:portfolio/widgets/my_view.dart';
+import 'package:portfolio/widgets/thumbnail_link_item.dart';
 
 class ViewPublications extends StatelessView {
   ViewPublications({super.key}) : super(name: "Publications", icon: Icons.article_rounded);

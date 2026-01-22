@@ -5,7 +5,7 @@ import 'package:web/web.dart' as web;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/material.dart';
 
-import 'package:portfolio/util.dart';
+import 'package:portfolio/util/miscellaneous.dart';
 
 late ValueNotifier<Offset> mouseGlobalPosition;
 bool _setMouseGlobalPosition = false;

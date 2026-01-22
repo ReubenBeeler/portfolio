@@ -3,13 +3,14 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:portfolio/bootstrapper.dart';
-import 'package:portfolio/parallax_scroller.dart';
-import 'package:portfolio/my_view.dart';
-import 'package:portfolio/view_certifications.dart';
-import 'package:portfolio/view_home.dart';
-import 'package:portfolio/util.dart';
-import 'package:portfolio/view_projects.dart';
-import 'package:portfolio/view_skills.dart';
+import 'package:portfolio/widgets/link_text.dart';
+import 'package:portfolio/widgets/parallax_scroller.dart';
+import 'package:portfolio/widgets/my_view.dart';
+import 'package:portfolio/views/view_certifications.dart';
+import 'package:portfolio/views/view_home.dart';
+import 'package:portfolio/util/miscellaneous.dart';
+import 'package:portfolio/views/view_projects.dart';
+import 'package:portfolio/views/view_skills.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // Home page:

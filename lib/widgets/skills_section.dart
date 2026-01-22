@@ -1,8 +1,8 @@
 import 'package:flutter/gestures.dart' show TapGestureRecognizer;
 import 'package:flutter/material.dart';
-import 'package:portfolio/my_card.dart';
-import 'package:portfolio/my_view.dart';
-import 'package:portfolio/staggered_grid.dart';
+import 'package:portfolio/widgets/my_card.dart';
+import 'package:portfolio/widgets/my_view.dart';
+import 'package:portfolio/widgets/staggered_grid.dart';
 
 class SkillsSection extends StatelessWidget {
   final ScrollController _controller = ScrollController();

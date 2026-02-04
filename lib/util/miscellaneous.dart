@@ -1,7 +1,6 @@
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart' show TapGestureRecognizer;
 import 'package:flutter/material.dart';
 
 Offset getGlobalOffset(GlobalKey key) {
@@ -43,12 +42,23 @@ class ConOscCurve extends Curve {
   double C(double t) => f(_tMap(t)) * (1 - s(t)) + s(t); // curve function
 
   final double Function(double t)? tMap;
+  // late final double Function(double t) _tMap = tMap ?? (t) => t;
   double _tMap(double t) => tMap?.call(t) ?? t;
 
   /// `n` must be integer for it to stop smoothly (derivative --> 0) at destination. Damping coefficient `a` is recommended to be `0 <= a <= 1`
   ///
   /// Note: `n > 0.5`. `floor(n)` is the number of times it reaches/passes the destination before it stops. For example, `n=1` will go to the destination once and stop smoothly. `n=3` will go past the destination once, come back and pass again, and then come back a 3rd time and stop smoothly. `n=2.5` will go past the destination once, come back and pass again, then come back a 3rd time for a hard stop.
   const ConOscCurve(this.n, {this.a = 0, this.tMap});
+
+  @override
+  double transformInternal(double t) => C(t);
+}
+
+class DoubleConOscCurve extends Curve {
+  double f(double t) => (1 - cos(pi * t)) / 2; // base function
+  double g(double t) => -10 * pow(t * (1 - t), 2) * cos(pi * t); // add a little oscillation beyond the start and end
+  double C(double t) => f(t) + g(t);
+  const DoubleConOscCurve();
 
   @override
   double transformInternal(double t) => C(t);

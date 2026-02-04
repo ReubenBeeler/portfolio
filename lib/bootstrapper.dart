@@ -1,22 +1,27 @@
+import 'dart:async';
+import 'dart:io' show sleep;
 import 'dart:math';
 import 'dart:ui';
 
+import 'package:portfolio/main.dart' show accentColor;
 import 'package:web/web.dart' as web;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/material.dart';
 
-import 'package:portfolio/util/miscellaneous.dart';
+import 'util/miscellaneous.dart';
+import 'util/state_machine.dart';
 
 late ValueNotifier<Offset> mouseGlobalPosition;
 bool _setMouseGlobalPosition = false;
 
 enum BootState {
+  // FADE_IN_SPLASH,
   SPLASH,
   FLY_IN(FlyingWhere.IN),
   WAITING(FlyingWhere.CENTER),
-  WAITING_MOUSE_CLICK(FlyingWhere.CENTER),
+  WAITING_FOR_MOUSE(FlyingWhere.CENTER),
   FLY_OUT((FlyingWhere.OUT)),
-  FADE_IN,
+  FADE_IN_CHILD,
   BOOTED;
 
   final FlyingWhere? flyingWhere;
@@ -25,30 +30,88 @@ enum BootState {
 }
 
 class Bootstrapper extends StatefulWidget {
-  final List<ImageProvider> precache;
-  final Widget? child;
+  final Future Function(BuildContext)? precache;
+  final Widget? Function()? child;
   final Color foregroundColor;
   final Color backgroundColor;
 
-  const Bootstrapper({super.key, this.precache = const [], this.child, this.foregroundColor = Colors.white, this.backgroundColor = Colors.black});
+  const Bootstrapper({super.key, this.precache, this.child, this.foregroundColor = Colors.white, this.backgroundColor = Colors.black});
 
   @override
   State<Bootstrapper> createState() => _BootstrapperState();
 }
 
 class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(vsync: this)..autoDispose(this);
+  late final AnimationController _flyInController = AnimationController(vsync: this)..autoDispose(this);
+  late final AnimationController _waitingController = AnimationController(vsync: this)..autoDispose(this);
+  late final AnimationController _flyOutController = AnimationController(vsync: this)..autoDispose(this);
+  late final AnimationController _fadeInChildController = AnimationController(vsync: this)..autoDispose(this);
   late final AnimationController _clickTextFadeController = AnimationController(vsync: this)..autoDispose(this);
 
-  BootState _bootState = BootState.FLY_IN; // I don't like the SPLASH fade in so skip it...
+  late final Widget? _child = widget.child?.call(); // only call once
 
+  bool _firstFrameDone = false;
+  bool _fontsReady = false;
+  bool _flyInDone = false;
+  // bool _waitedMinimum = false;
+  bool _childReady = false;
   bool _mouseReady = false;
-  bool _waitedMinimum = false;
-  int _numPrecached = 0;
-  bool get cacheReady => _numPrecached == widget.precache.length;
+  bool _flyOutDone = false;
+  bool _fadeInChild = false;
 
-  bool get allReadyButMouse => _waitedMinimum && cacheReady && !_mouseReady;
-  bool get bootReady => _waitedMinimum && cacheReady && _mouseReady;
+  late final _stateMachine =
+      StateMachine(BootState.SPLASH, {
+          BootState.SPLASH: () => _firstFrameDone && _fontsReady ? BootState.FLY_IN : null,
+          BootState.FLY_IN: () => _flyInDone ? BootState.WAITING : null,
+          // BootState.WAITING: () {
+          //   // timerDone represents minimum time here
+          //   if (_waitedMinimum && cacheReady) {
+          //     if (!_mouseReady) return BootState.WAITING_FOR_MOUSE;
+          //     return BootState.FLY_OUT;
+          //   }
+          // },
+          BootState.WAITING: () => _childReady ? BootState.FLY_OUT : null,
+          // BootState.WAITING_FOR_MOUSE: () => _mouseReady ? BootState.FLY_OUT : null,
+          BootState.FLY_OUT: () => _flyOutDone ? BootState.FADE_IN_CHILD : null,
+          BootState.FADE_IN_CHILD: () => _fadeInChild ? BootState.BOOTED : null,
+        })
+        ..addListener(_stateMachineListener)
+        ..addListener(() => setState(() {}));
+
+  BootState get state => _stateMachine.value;
+
+  void _stateMachineListener() {
+    void controllerRestart(AnimationController controller, Duration duration, VoidCallback callback) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        // wait to start the animation after 1st frame to prevent from UI jank
+        controller.restart(duration).whenComplete(() {
+          callback();
+          _stateMachine.update();
+        });
+      });
+    }
+
+    switch (state) {
+      case BootState.FLY_IN:
+        controllerRestart(_flyInController, const Duration(milliseconds: 1300), () => _flyInDone = true);
+      case BootState.WAITING:
+        if (_childReady) _stateMachine.update(); // just in case cache was already loaded
+      //   controllerRestart(const Duration(milliseconds: 500), () => _waitedMinimum = true);
+      // case BootState.WAITING_FOR_MOUSE:
+      //   _clickTextFadeController.restart(const Duration(seconds: 1));
+      //   Future.delayed(const Duration(milliseconds: 125)).whenComplete(() {
+      //     if (state == BootState.WAITING_FOR_MOUSE) {
+      //       web.document.body?.style.cursor = 'pointer'; // MouseRegion doesn't automatically update this if the mouse hasn't interacted with the app yet
+      //       _waitingMouseClickCursor.value = SystemMouseCursors.click; // forces MouseRegion to re-render with updated mouse
+      //     }
+      //   });
+      case BootState.FLY_OUT:
+        controllerRestart(_flyOutController, const Duration(milliseconds: 1300), () => _flyOutDone = true);
+      case BootState.FADE_IN_CHILD:
+        controllerRestart(_fadeInChildController, const Duration(seconds: 1), () => _fadeInChild = true);
+      case _:
+    }
+  }
 
   final ValueNotifier<MouseCursor> _waitingMouseClickCursor = ValueNotifier(SystemMouseCursors.basic);
 
@@ -64,58 +127,28 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
   void updateMouseReady(PointerEvent event) {
     updateMouseGlobalPosition(event);
     _mouseReady = true;
-    updateWaitingState();
+    _stateMachine.update();
   }
 
   @override
   void initState() {
     super.initState();
 
+    GoogleFonts.pendingFonts([
+      GoogleFonts.roboto(),
+    ]).then((_) {
+      _fontsReady = true;
+      _stateMachine.update();
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      for (var imageProvider in widget.precache) {
-        precacheImage(imageProvider, context).whenComplete(() {
-          ++_numPrecached;
-          updateWaitingState();
-        });
-      }
+      _firstFrameDone = true;
+      _stateMachine.update();
+      widget.precache?.call(context).whenComplete(() {
+        _childReady = true;
+        _stateMachine.update();
+      });
     });
-
-    WidgetsBinding.instance.endOfFrame.then((_) {
-      // skip fade-in splash
-      // _controller.start(const Duration(milliseconds: 0)).whenComplete(() {
-      //   setState(() => _bootState = BootState.FLY_IN);
-      _controller.restart(const Duration(milliseconds: 1000)).whenComplete(() {
-        setState(() => _bootState = BootState.WAITING);
-        _controller.restart(const Duration(milliseconds: 500)).whenComplete(() {
-          _waitedMinimum = true;
-          updateWaitingState();
-        });
-      });
-      // });
-    });
-  }
-
-  void updateWaitingState() {
-    if (allReadyButMouse) {
-      setState(() => _bootState = BootState.WAITING_MOUSE_CLICK);
-      _clickTextFadeController.restart(const Duration(seconds: 1));
-      Future.delayed(const Duration(milliseconds: 125)).whenComplete(() {
-        runOnPlatformThread(() {
-          if (_bootState == BootState.WAITING_MOUSE_CLICK) {
-            web.document.body?.style.cursor = 'pointer'; // MouseRegion doesn't automatically update this if the mouse hasn't interacted with the app yet
-            _waitingMouseClickCursor.value = SystemMouseCursors.click; // forces MouseRegion to re-render with updated mouse
-          }
-        });
-      });
-    } else if (bootReady) {
-      setState(() => _bootState = BootState.FLY_OUT);
-      _controller.restart(const Duration(milliseconds: 1000)).whenComplete(() {
-        setState(() => _bootState = BootState.FADE_IN);
-        _controller.restart(const Duration(milliseconds: 1000)).whenComplete(() {
-          setState(() => _bootState = BootState.BOOTED);
-        });
-      });
-    }
   }
 
   @override
@@ -138,16 +171,27 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
   }
 
   Widget? getContent() {
-    Widget? flyingText = _bootState.flyingWhere == null
-        ? null
-        : Center(
-            child: FlyingText(
-              "EXPLORE",
-              color: widget.foregroundColor,
-              flyingWhere: _bootState.flyingWhere!,
-              controller: _controller,
-            ),
-          );
+    Widget flyingText(FlyingWhere where, AnimationController controller) {
+      return Center(
+        child: FlyingText(
+          "Loading...",
+          color: widget.foregroundColor,
+          flyingWhere: where,
+          controller: controller,
+        ),
+      );
+    }
+
+    // Widget? flyingText = state.flyingWhere == null
+    //     ? null
+    //     : Center(
+    //         child: FlyingText(
+    //           "Loading...",
+    //           color: widget.foregroundColor,
+    //           flyingWhere: state.flyingWhere!,
+    //           controller: _controller,
+    //         ),
+    //       );
     Widget clickText = ValueListenableBuilder(
       valueListenable: _waitingMouseClickCursor,
       builder: (_, cursor, child) => MouseRegion(
@@ -178,50 +222,47 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
       ),
     );
     List<Widget> stack;
-    switch (_bootState) {
+    switch (state) {
       case BootState.SPLASH:
         stack = [
-          AnimatedBuilder(
-            animation: _controller,
-            builder: (_, _) => SizedBox.expand(
-              child: ColoredBox(color: widget.backgroundColor.withValues(alpha: _controller.value)),
-            ),
-          ),
+          SizedBox.expand(child: ColoredBox(color: widget.backgroundColor)),
         ];
       case BootState.FLY_IN:
-      case BootState.WAITING:
-        // TODO make text larger and make like Container(margins, FittedBox)
         stack = [
           SizedBox.expand(child: ColoredBox(color: widget.backgroundColor)),
-          flyingText!,
-          // TODO add "Loading..." in WAITING state
+          flyingText(FlyingWhere.IN, _flyInController),
         ];
-      case BootState.WAITING_MOUSE_CLICK:
+      case BootState.WAITING:
         stack = [
           SizedBox.expand(child: ColoredBox(color: widget.backgroundColor)),
-          flyingText!,
+          flyingText(FlyingWhere.CENTER, _waitingController),
+        ];
+      case BootState.WAITING_FOR_MOUSE:
+        stack = [
+          SizedBox.expand(child: ColoredBox(color: widget.backgroundColor)),
+          flyingText(FlyingWhere.CENTER, _waitingController),
           clickText, // top of stack so MouseRegion keeps right cursor
         ];
       case BootState.FLY_OUT:
         stack = [
           SizedBox.expand(child: ColoredBox(color: widget.backgroundColor)),
-          flyingText!,
+          flyingText(FlyingWhere.OUT, _flyOutController),
         ];
-      case BootState.FADE_IN:
+      case BootState.FADE_IN_CHILD:
         stack = [
-          ?widget.child, // TODO child icon not animating correctly when switching between fade-in and booted?
+          ?_child, // TODO child icon not animating correctly when switching between fade-in and booted?
           AnimatedBuilder(
-            animation: _controller,
+            animation: _fadeInChildController,
             builder: (_, _) {
               final box = SizedBox.expand(
-                child: ColoredBox(color: widget.backgroundColor.withValues(alpha: 1.0 - _controller.value)),
+                child: ColoredBox(color: widget.backgroundColor.withValues(alpha: 1.0 - _fadeInChildController.value)),
               );
-              return _controller.value < 0.2 ? AbsorbPointer(child: box) : IgnorePointer(child: box);
+              return _fadeInChildController.value < 0.2 ? AbsorbPointer(child: box) : IgnorePointer(child: box);
             },
           ),
         ];
       case BootState.BOOTED:
-        return widget.child;
+        return _child;
     }
     // scaffold for providing text theme data
     return Scaffold(
@@ -248,19 +289,28 @@ class FlyingText extends StatefulWidget {
 }
 
 class _FlyingTextState extends State<FlyingText> {
-  static const Curve _FLY_CURVE = ConOscCurve(2, a: 1);
+  static const Curve _FLY_CURVE = DoubleConOscCurve(); // ConOscCurve(2, a: 1);
 
   @override
   Widget build(BuildContext context) {
+    // TODO make this "Loading..." animation run even when the tab is in the background.
     return AnimatedBuilder(
       animation: widget.controller,
       builder: (context, _) => Row(
         mainAxisSize: MainAxisSize.min,
         children: List.generate(widget.text.length, (index) {
-          final delay = 1; // fraction of first letter's animation when last letter starts
-          final letterLength = 1 / (1 + delay); // fraction of total length
-          final start = index * (1 - letterLength) / (7 - 1);
-          final end = start + letterLength;
+          final double start, end;
+          if (widget.text.length == 1) {
+            start = 0;
+            end = 1;
+          } else {
+            final delay = 1; // fraction of first letter's animation when last letter starts
+            final letterLength = 1 / (1 + delay); // fraction of total length
+            // final int n = widget.text.length;
+            // (n - index)/(n*(n+1)~/2);
+            start = index * (1 - letterLength) / (widget.text.length - 1);
+            end = start + letterLength;
+          }
 
           Tween<double> tween;
           switch (widget.flyingWhere) {
@@ -284,7 +334,7 @@ class _FlyingTextState extends State<FlyingText> {
             widget.text[index],
             textAlign: TextAlign.center,
             textDirection: TextDirection.ltr,
-            style: GoogleFonts.rumRaisin(
+            style: GoogleFonts.roboto(
               color: widget.color,
               fontSize: min(screenSize.width * 0.15, screenSize.height * 0.4),
             ),

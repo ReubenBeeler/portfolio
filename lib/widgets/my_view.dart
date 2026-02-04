@@ -6,6 +6,7 @@ mixin MyView on Widget {
   String get name;
   IconData get icon;
   GlobalKey get globalKey;
+  Future Function()? get precache;
 }
 
 abstract class StatefulView extends StatefulWidget with MyView {
@@ -13,7 +14,9 @@ abstract class StatefulView extends StatefulWidget with MyView {
   final String name;
   @override
   final IconData icon;
-  StatefulView({GlobalKey? key, required this.name, required this.icon}) : super(key: key ?? GlobalKey());
+  @override
+  final Future Function()? precache;
+  StatefulView({GlobalKey? key, required this.name, required this.icon, this.precache}) : super(key: key ?? GlobalKey());
 
   @override
   GlobalKey<State<StatefulWidget>> get globalKey => key as GlobalKey;
@@ -24,7 +27,9 @@ abstract class StatelessView extends StatelessWidget with MyView {
   final String name;
   @override
   final IconData icon;
-  StatelessView({GlobalKey? key, required this.name, required this.icon}) : super(key: key ?? GlobalKey());
+  @override
+  final Future Function()? precache;
+  StatelessView({GlobalKey? key, required this.name, required this.icon, this.precache}) : super(key: key ?? GlobalKey());
 
   @override
   GlobalKey<State<StatefulWidget>> get globalKey => key as GlobalKey;

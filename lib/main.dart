@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:portfolio/bootstrapper.dart';
 import 'package:portfolio/widgets/link_text.dart';
 import 'package:portfolio/widgets/parallax_scroller.dart';
@@ -10,7 +11,6 @@ import 'package:portfolio/views/view_certifications.dart';
 import 'package:portfolio/views/view_home.dart';
 import 'package:portfolio/util/miscellaneous.dart';
 import 'package:portfolio/views/view_projects.dart';
-import 'package:portfolio/views/view_skills.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // Home page:
@@ -29,17 +29,31 @@ List<MyView> views = [
   ViewHome(),
   ViewProjects(),
   // ViewPublications(),
-  ViewSkills(),
+  // ViewSkills(),
   ViewCertifications(),
 ];
 final accentColor = Color(0xFF00E8F3); // Color.lerp(Color(0xFF00FFEE), Color(0xFF00B3FF), 0.3)!;
 const String background_path = "assets/background.webp";
 
 void main() {
+  debugProfileBuildsEnabled = true;
+  debugProfilePaintsEnabled = true;
+
   assert(views.isNotEmpty);
   const String title = "Reuben's Portfolio";
   final loadKey = GlobalKey();
 
+  final images = [
+    // maybe don't pre-cache all?
+    NetworkImage('assets/background.webp'),
+    NetworkImage('assets/github_logo_clean.webp'),
+    NetworkImage('assets/IBM Applied DevOps Engineering Certificate.webp'),
+    NetworkImage('assets/java_badge.webp'),
+    NetworkImage('assets/keylogging_thumbnail.webp'),
+    NetworkImage('assets/linkedin_circle.webp'),
+    NetworkImage('assets/PAOA vs QAOA thumbnail.webp'),
+    NetworkImage('assets/profile_pic.webp'),
+  ];
   runApp(
     MaterialApp(
       title: title,
@@ -47,26 +61,16 @@ void main() {
       // theme: ...
       home: Bootstrapper(
         // TODO remove pubspec.yaml assets and load from web/ so that Bootstrapper animation runs while we load assets instead of waiting until app + assets bundle is loaded
-        precache: [
-          // AssetImage(background_path),
-          // AssetImage('assets/profile_pic.webp'),
-          // AssetImage('assets/resume.webp'),
-          // AssetImage('assets/linkedin_circle.webp'),
-          // AssetImage('assets/github_logo_clean.webp'),
-          // maybe don't pre-cache all?
-          NetworkImage('assets/auchanic_thumbnail.webp'),
-          NetworkImage('assets/background.webp'),
-          NetworkImage('assets/compass_thumbnail.webp'),
-          NetworkImage('assets/generator_thumbnail.webp'),
-          NetworkImage('assets/github_logo_clean.webp'),
-          NetworkImage('assets/java_badge.webp'),
-          NetworkImage('assets/keylogging_thumbnail.webp'),
-          NetworkImage('assets/linkedin_circle.webp'),
-          NetworkImage('assets/PAOA vs QAOA thumbnail.webp'),
-          NetworkImage('assets/profile_pic.webp'),
-          NetworkImage('assets/resume.webp'),
-        ], // just pre-cache images in first view
-        child: Scaffold(
+        precache: (context) async {
+          for (var view in views) {
+            view.precache?.call();
+          }
+          // TODO merge these images into specific view precache
+          for (var imageProvider in images) {
+            await precacheImage(imageProvider, context);
+          }
+        },
+        child: () => Scaffold(
           key: loadKey, // to prevent re-initializing state immediately after fade-in by bootstrapper
           // appBar: AppBar(
           //   backgroundColor: accentColor,

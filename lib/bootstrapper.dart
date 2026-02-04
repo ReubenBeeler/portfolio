@@ -1,10 +1,6 @@
 import 'dart:async';
-import 'dart:io' show sleep;
 import 'dart:math';
-import 'dart:ui';
 
-import 'package:portfolio/main.dart' show accentColor;
-import 'package:web/web.dart' as web;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/material.dart';
 
@@ -250,7 +246,7 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
         ];
       case BootState.FADE_IN_CHILD:
         stack = [
-          ?_child, // TODO child icon not animating correctly when switching between fade-in and booted?
+          ?_child,
           AnimatedBuilder(
             animation: _fadeInChildController,
             builder: (_, _) {

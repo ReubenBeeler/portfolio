@@ -22,7 +22,7 @@ final _nameFont = GoogleFonts.dmSerifDisplay(
 
 final _jobTitleFont = GoogleFonts.roboto(
   color: accentColor,
-  fontSize: 50,
+  fontSize: 60,
   fontWeight: FontWeight.w500,
   fontStyle: FontStyle.italic,
   shadows: [
@@ -32,6 +32,16 @@ final _jobTitleFont = GoogleFonts.roboto(
       offset: Offset(-0.1, 0.75),
     ),
   ],
+);
+
+final _jobTitleBorderFont = GoogleFonts.roboto(
+  foreground: Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2
+    ..color = Colors.black,
+  fontSize: 60,
+  fontWeight: FontWeight.w500,
+  fontStyle: FontStyle.italic,
 );
 
 class ViewHome extends StatelessView {
@@ -76,7 +86,35 @@ class ViewHome extends StatelessView {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text("Reuben Beeler", style: _nameFont),
-                              Text("Software Engineer", style: _jobTitleFont),
+                              Stack(
+                                children: [
+                                  Text("Software Engineer", style: _jobTitleBorderFont),
+                                  Text("Software Engineer", style: _jobTitleFont),
+                                ],
+                              ),
+                              // Stack(
+                              //   children: [
+                              //     // Stroked text (the border)
+                              //     Text(
+                              //       'Text Content',
+                              //       style: TextStyle(
+                              //         fontSize: 40,
+                              //         foreground: Paint()
+                              //           ..style = PaintingStyle.stroke
+                              //           ..strokeWidth = 2
+                              //           ..color = Colors.black,
+                              //       ),
+                              //     ),
+                              //     // Solid fill text
+                              //     Text(
+                              //       'Text Content',
+                              //       style: TextStyle(
+                              //         fontSize: 40,
+                              //         color: Colors.white,
+                              //       ),
+                              //     ),
+                              //   ],
+                              // ),
                               // Text(
                               //   "Tag line",
                               //   style: GoogleFonts.roboto(

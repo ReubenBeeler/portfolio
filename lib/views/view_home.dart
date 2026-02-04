@@ -7,8 +7,42 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:portfolio/main.dart' show accentColor;
 
+final _nameFont = GoogleFonts.dmSerifDisplay(
+  color: Colors.white,
+  fontSize: 100,
+  // fontWeight: FontWeight.bold,
+  shadows: [
+    Shadow(
+      blurRadius: 5.0,
+      color: Colors.black,
+      offset: Offset(0, 2.5),
+    ),
+  ],
+);
+
+final _jobTitleFont = GoogleFonts.roboto(
+  color: accentColor,
+  fontSize: 50,
+  fontWeight: FontWeight.w500,
+  fontStyle: FontStyle.italic,
+  shadows: [
+    Shadow(
+      blurRadius: 2.0,
+      color: Colors.black,
+      offset: Offset(-0.1, 0.75),
+    ),
+  ],
+);
+
 class ViewHome extends StatelessView {
-  ViewHome({super.key}) : super(name: "Home", icon: Icons.home_rounded);
+  ViewHome({super.key})
+    : super(
+        name: "Home",
+        icon: Icons.home_rounded,
+        precache: () async {
+          await GoogleFonts.pendingFonts([_nameFont, _jobTitleFont]);
+        },
+      );
 
   final linkedinKey = GlobalKey();
   final githubKey = GlobalKey();
@@ -41,51 +75,23 @@ class ViewHome extends StatelessView {
                             // mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                "REUBEN BEELER",
-                                style: GoogleFonts.rumRaisin(
-                                  color: Colors.white,
-                                  fontSize: 100,
-                                  shadows: [
-                                    Shadow(
-                                      blurRadius: 5.0,
-                                      color: Colors.black,
-                                      offset: Offset(0, 2.5),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Text(
-                                "DevOps Software Engineer",
-                                style: GoogleFonts.roboto(
-                                  color: accentColor,
-                                  fontSize: 50,
-                                  fontWeight: FontWeight.w500,
-                                  fontStyle: FontStyle.italic,
-                                  shadows: [
-                                    Shadow(
-                                      blurRadius: 2.0,
-                                      color: Colors.black,
-                                      offset: Offset(-0.1, 0.75),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Text(
-                                "I spin projects into production",
-                                style: GoogleFonts.roboto(
-                                  color: Colors.white,
-                                  fontSize: 40,
-                                  fontWeight: FontWeight.w400,
-                                  shadows: [
-                                    Shadow(
-                                      blurRadius: 2.0,
-                                      color: Colors.black,
-                                      offset: Offset(0, 1),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                              Text("Reuben Beeler", style: _nameFont),
+                              Text("Software Engineer", style: _jobTitleFont),
+                              // Text(
+                              //   "Tag line",
+                              //   style: GoogleFonts.roboto(
+                              //     color: Colors.white,
+                              //     fontSize: 40,
+                              //     fontWeight: FontWeight.w400,
+                              //     shadows: [
+                              //       Shadow(
+                              //         blurRadius: 2.0,
+                              //         color: Colors.black,
+                              //         offset: Offset(0, 1),
+                              //       ),
+                              //     ],
+                              //   ),
+                              // ),
                             ],
                           ),
                         ),

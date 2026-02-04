@@ -152,6 +152,7 @@ class ThumbnailLinkItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // TODO make the whole thumbnail or card clickable instead of just the icon in the upper right
     return MyCard(
       child: Container(
         width: double.infinity,

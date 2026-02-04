@@ -13,7 +13,6 @@ class ViewSkills extends StatelessView {
       widthFactor: 0.9,
       child: SkillsSection(
         // TODO add icons to skills!! Make this more visual-based
-        // TODO add DevOps card with soft-skill mention like agility, etc. AND hard skills like Jenkins CI/CD
         skillCategories: [
           SkillCategory(
             title: 'DevOps',

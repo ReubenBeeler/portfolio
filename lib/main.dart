@@ -60,7 +60,6 @@ void main() {
       color: accentColor,
       // theme: ...
       home: Bootstrapper(
-        // TODO remove pubspec.yaml assets and load from web/ so that Bootstrapper animation runs while we load assets instead of waiting until app + assets bundle is loaded
         precache: (context) async {
           for (var view in views) {
             view.precache?.call();
@@ -176,7 +175,7 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
         );
       } else if (i < views.length - 1) {
         scrollContent.add(views[i]);
-        scrollContent.add(const SizedBox(height: 50));
+        scrollContent.add(const SizedBox(height: 50)); // TODO add space to top of each view (instead of between views) for more space between navbar and view when auto-scrolling
       } else {
         scrollContent.add(
           ConstrainedBox(
@@ -226,7 +225,7 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
                   ),
                   Container(
                     height: footerHeight,
-                    color: const Color(0xFF4E423F),
+                    color: const Color(0xFF000000), // const Color(0xFF4E423F),
                     padding: EdgeInsets.only(left: 20.0),
                     child: Align(
                       alignment: Alignment.centerLeft,
@@ -267,7 +266,6 @@ class NavBar extends StatefulWidget {
   State<StatefulWidget> createState() => _NavBarState();
 }
 
-// TODO when switching between inline and overlay, NavBar gets a new state! Prevent this from happening...
 class _NavBarState extends AnimatedState<NavBar> with TickerProviderStateMixin {
   int? _prevActiveIndex = 0; // just to be same as _activeIndex at start
   int? _activeIndex = 0;
@@ -293,7 +291,7 @@ class _NavBarState extends AnimatedState<NavBar> with TickerProviderStateMixin {
     targetOffset = clampDouble(targetOffset, position.minScrollExtent, position.maxScrollExtent); // controller.animateTo automatically does this but I want to ensure duration is updated too
     widget.controller.animateTo(
       targetOffset,
-      duration: Duration(milliseconds: (700 * sqrt(((targetOffset - widget.controller.position.pixels) / screenHeight).abs())).round()), // TODO set max time of e.g. 1 second
+      duration: Duration(milliseconds: (700 * sqrt(((targetOffset - widget.controller.position.pixels) / screenHeight).abs())).round()),
       curve: Curves.easeInOut,
     );
   }
@@ -377,7 +375,7 @@ class _NavBarState extends AnimatedState<NavBar> with TickerProviderStateMixin {
                 Color mainColor = getColor([i]);
                 Color leftColor = getColor([i, i - 1]);
                 Color rghtColor = getColor([i, i + 1]);
-                double widthT = widget.isActive ? 2 : 0; // TODO set to const 2 pixels and change inactiveColor to accentColor to match divider if navbar not yet overlayed
+                double widthT = widget.isActive ? 2 : 0;
                 double widthB = widget.isActive ? 2 : 0;
                 double widthL = (i == 0) ? 2 : 1;
                 double widthR = (i == views.length - 1) ? 2 : 1;

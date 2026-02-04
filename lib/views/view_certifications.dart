@@ -20,8 +20,9 @@ class ViewCertifications extends StatelessView {
             child: Wrap(
               alignment: WrapAlignment.center,
               spacing: 40.0,
-              runSpacing: 40.0,
+              runSpacing: 20.0,
               children: [
+                // TODO make a visual effect like translucent overlay when mouse hovers so that it is clear that these are links
                 SizedBox(
                   height: 0.5 * screenSize.height,
                   child: IconButton(
@@ -45,6 +46,7 @@ class ViewCertifications extends StatelessView {
             ),
           ),
           // TODO include pending certificates widget!
+          SizedBox(height: 20),
         ],
       ),
     );

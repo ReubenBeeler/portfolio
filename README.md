@@ -1,7 +1,7 @@
 # Portfolio
 [![Build and Deploy to GitHub Pages](https://github.com/ReubenBeeler/portfolio/actions/workflows/workflow.yml/badge.svg)](https://github.com/ReubenBeeler/portfolio/actions/workflows/workflow.yml)
 
-A Flutter web application showcasing my technical projects and experience. Live at [reubenbeeler.me](https://reubenbeeler.me).
+A Flutter web application showcasing my technical credentials. See [reubenbeeler.me](https://reubenbeeler.me).
 
 ## Technical Highlights
 
@@ -21,7 +21,7 @@ A Flutter web application showcasing my technical projects and experience. Live 
 
 ## Local Development
 
-Running this locally is as simple as
+Run the code locally with
 ```bash
 flutter config --enable-web
 flutter pub get
@@ -41,7 +41,7 @@ lib/
 
 ## What I Learned
 
-Building this portfolio taught me how to develop and host a website with CI/CD via GitHub Actions, and how to optimize the design and build patterns for specific performance criteria.
+Building this portfolio taught me how to develop and host a website with CI/CD, and how to optimize the design and build patterns for specific performance criteria (such as faster bundling and avoiding FOUC).
 
 ---
 

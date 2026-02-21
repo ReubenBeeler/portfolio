@@ -87,6 +87,8 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
       });
     }
 
+    // TODO after all that, go back to trying just a fade-in...
+
     switch (state) {
       case BootState.FLY_IN:
         controllerRestart(_flyInController, const Duration(milliseconds: 1300), () => _flyInDone = true);

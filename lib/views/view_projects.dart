@@ -26,6 +26,15 @@ class ViewProjects extends StatelessView {
           ),
           const SizedBox(height: 20),
           Align(
+            alignment: AlignmentGeometry.topCenter,
+            child: ThumbnailLinkItem(
+              title: 'Buckshot, a collection of microservices for at-home wildlife photography',
+              linkUrl: 'https://buckshot.reubenbeeler.me/about',
+              image: NetworkImage('assets/buckshot.webp'),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Align(
             alignment: AlignmentGeometry.topRight,
             child: ThumbnailLinkItem(
               title: 'PAOA vs. QAOA, an optimizer benchmarker on SK Ising models',

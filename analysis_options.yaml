@@ -33,4 +33,3 @@ formatter:
 analyzer:
   errors:
     constant_identifier_names: ignore
-

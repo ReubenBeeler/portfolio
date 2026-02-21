@@ -28,7 +28,7 @@ class ViewProjects extends StatelessView {
           Align(
             alignment: AlignmentGeometry.topCenter,
             child: ThumbnailLinkItem(
-              title: 'Buckshot, a collection of microservices for at-home wildlife photography',
+              title: 'Buckshot, a collection of microservices for autonomous wildlife photography',
               linkUrl: 'https://buckshot.reubenbeeler.me/about',
               image: NetworkImage('assets/buckshot.webp'),
             ),

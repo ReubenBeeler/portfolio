@@ -1,4 +1,167 @@
 <!DOCTYPE html><html><head>
+  <!--
+    Boot profiler. Inert unless the page is opened with ?profile, in which case
+    it records the boot and prints a pasteable report over the page. It sits
+    before coi-serviceworker.js so it can see that script's reloads and logs.
+    Measuring boot against localhost is not the same measurement as measuring it
+    against the real host over a real network, so this ships in production.
+  -->
+  <script>
+  (function () {
+    if (!/(^|[?&])profile\b/.test(location.search)) return;
+    var t0 = performance.now(), frames = [], loaf = [], phases = [], logs = [], done = false;
+    var CAP_MS = 120000;
+    var NAV = 'bootprofile:navs';
+    var navs = (parseInt(sessionStorage.getItem(NAV) || '0', 10) || 0) + 1;
+    try { sessionStorage.setItem(NAV, String(navs)); } catch (e) {}
+    function r1(x) { return Math.round(x * 10) / 10; }
+
+    window.__bootPhase = function (name) {
+      name = String(name);
+      phases.push([r1(performance.now()), name]);
+      if (name === 'BOOTED') setTimeout(finish, 800);
+    };
+    (function tick(ts) { frames.push(ts); if (!done) requestAnimationFrame(tick); })(performance.now());
+
+    ['log', 'warn', 'error'].forEach(function (lvl) {
+      var orig = console[lvl];
+      console[lvl] = function () {
+        try { if (logs.length < 40) logs.push(lvl + ': ' + Array.prototype.map.call(arguments, String).join(' ').slice(0, 180)); } catch (e) {}
+        return orig.apply(console, arguments);
+      };
+    });
+    try {
+      new PerformanceObserver(function (l) {
+        l.getEntries().forEach(function (e) { loaf.push([r1(e.startTime), r1(e.duration), r1(e.blockingDuration || 0)]); });
+      }).observe({ type: 'long-animation-frame', buffered: true });
+    } catch (e) {}
+
+    function pct(a, p) { if (!a.length) return 0; var s = a.slice().sort(function (x, y) { return x - y; }); return s[Math.min(s.length - 1, Math.round(p / 100 * (s.length - 1)))]; }
+    function pad(s, n, right) { s = String(s); while (s.length < n) s = right ? ' ' + s : s + ' '; return s; }
+
+    function gpu() {
+      try {
+        var c = document.createElement('canvas'), g2 = c.getContext('webgl2'), g = g2 || c.getContext('webgl');
+        if (!g) return 'NONE (software rendering, frame times are not meaningful)';
+        var d = g.getExtension('WEBGL_debug_renderer_info');
+        var s = (d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER)) + (g2 ? ' [webgl2]' : ' [webgl1]');
+        var lose = g.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext();
+        return s;
+      } catch (e) { return 'unknown: ' + e; }
+    }
+
+    function build() {
+      var out = [], res = [], paint = {};
+      try { performance.getEntriesByType('paint').forEach(function (e) { paint[e.name] = r1(e.startTime); }); } catch (e) {}
+      try { performance.getEntriesByType('resource').forEach(function (e) { res.push([r1(e.startTime), r1(e.responseEnd), e.transferSize || e.encodedBodySize || 0, e.name]); }); } catch (e) {}
+      res.sort(function (a, b) { return a[0] - b[0]; });
+
+      out.push('#### BOOT PROFILE (in-app) ' + new Date().toISOString());
+      out.push('url       : ' + location.href);
+      out.push('device    : ' + navigator.userAgent);
+      out.push('viewport  : ' + innerWidth + 'x' + innerHeight + ' dpr=' + devicePixelRatio +
+               ' cores=' + (navigator.hardwareConcurrency || '?') + ' mem=' + (navigator.deviceMemory || '?'));
+      out.push('GPU       : ' + gpu());
+      out.push('isolated  : crossOriginIsolated=' + !!self.crossOriginIsolated + '  document loads=' + navs);
+      var names = res.map(function (r) { return r[3]; }).join(' ');
+      var app = /main\.dart\.wasm/.test(names) ? 'wasm' : (/main\.dart\.js/.test(names) ? 'dart2js FALLBACK' : '?');
+      var eng = /skwasm/.test(names) ? 'skwasm' : (/canvaskit/.test(names) ? 'canvaskit' : '?');
+      out.push('renderer  : app=' + app + '  engine=' + eng +
+               (app.indexOf('FALLBACK') >= 0 ? '   <-- NOT the wasm build; check the GPU line, no WebGL forces this' : ''));
+      out.push('paint     : first=' + (paint['first-paint'] || '-') + 'ms  contentful=' + (paint['first-contentful-paint'] || '-') + 'ms');
+
+      var booted = null;
+      for (var i = 0; i < phases.length; i++) if (phases[i][1] === 'BOOTED') booted = phases[i][0];
+      out.push('handover  : ' + (booted !== null ? Math.round(booted) + 'ms' : 'NOT REACHED') + '   frames=' + frames.length);
+      if (booted === null) {
+        out.push('            report fired on the ' + (CAP_MS / 1000) + 's cap, so the boot never finished.');
+        out.push('            Usually the renderer download: check the critical path below.');
+      }
+
+      var boot = null, engine = null;
+      res.forEach(function (r) {
+        if (/flutter_bootstrap\.js/.test(r[3])) boot = boot === null ? r[1] : Math.min(boot, r[1]);
+        if (/canvaskit\.(js|wasm)|skwasm|main\.dart\.(wasm|js|mjs)/.test(r[3])) engine = engine === null ? r[0] : Math.min(engine, r[0]);
+      });
+      if (boot !== null && engine !== null) {
+        var gap = Math.round(engine - boot);
+        out.push('sw stall  : ' + gap + 'ms between flutter_bootstrap.js and the renderer' + (gap > 300 ? '   <-- DEAD TIME' : ''));
+      }
+
+      out.push('');
+      out.push('phase                  span     n     p50     p90      max   over 16.7ms');
+      var end = frames.length ? frames[frames.length - 1] : 0;
+      var wins = [];
+      if (frames.length && phases.length && frames[0] < phases[0][0]) wins.push(['(before FLY_IN)', frames[0], phases[0][0]]);
+      phases.forEach(function (p, i) { wins.push([p[1] === 'BOOTED' ? 'BOOTED (idle check)' : p[1], p[0], i + 1 < phases.length ? phases[i + 1][0] : end]); });
+      if (!phases.length) out.push('  (no phase marks: this build predates the boot_trace hook)');
+      var worst = [0, '?'];
+      wins.forEach(function (w) {
+        var sel = frames.filter(function (f) { return f >= w[1] && f < w[2]; });
+        var iv = [];
+        for (var i = 1; i < sel.length; i++) { var d = sel[i] - sel[i - 1]; iv.push(d); if (d > worst[0]) worst = [d, w[0]]; }
+        if (!sel.length) return;
+        var cells = iv.length
+          ? [pct(iv, 50).toFixed(1), pct(iv, 90).toFixed(1), Math.max.apply(null, iv).toFixed(1),
+             iv.filter(function (x) { return x > 16.7; }).length + '/' + iv.length]
+          : ['-', '-', '-', 'too short to sample'];
+        out.push('  ' + pad(w[0], 20) + pad(Math.round(w[2] - w[1]) + 'ms', 8, true) +
+                 pad(iv.length, 6, true) + pad(cells[0], 8, true) +
+                 pad(cells[1], 8, true) + pad(cells[2], 9, true) + pad(cells[3], 22, true));
+      });
+      out.push('  worst single frame: ' + worst[0].toFixed(1) + 'ms, during ' + worst[1]);
+
+      var big = loaf.filter(function (e) { return e[1] >= 50; }).sort(function (a, b) { return b[1] - a[1]; });
+      out.push('');
+      out.push('long animation frames >=50ms: ' + big.length +
+               (big.length ? '  worst: ' + big.slice(0, 6).map(function (e) { return e[1] + 'ms(blocking ' + e[2] + ')'; }).join(', ') : ''));
+
+      out.push('');
+      out.push('critical path (ms from navigation start, size, origin):');
+      res.filter(function (r) { return /canvaskit|skwasm|main\.dart|\.ttf|\.otf|\.woff|\.webp|Manifest/.test(r[3]); })
+         .slice(0, 24).forEach(function (r) {
+        var origin = '-'; try { origin = new URL(r[3]).host; } catch (e) {}
+        out.push('  ' + pad(Math.round(r[0]), 7, true) + ' ->' + pad(Math.round(r[1]), 7, true) +
+                 pad(r[2] ? Math.round(r[2] / 1024) + 'K' : '-', 8, true) + '  ' + pad(origin, 22) + ' ' +
+                 decodeURIComponent(r[3].split('/').pop()).slice(0, 42));
+      });
+
+      var warn = logs.filter(function (l) { return /prepareServiceWorker|CPU-only|webGLVersion|Reloading page|COEP|COOP/.test(l); });
+      if (warn.length) { out.push(''); out.push('notable console output:'); warn.slice(0, 8).forEach(function (l) { out.push('  ' + l); }); }
+      out.push('#### END');
+      return out.join('\n');
+    }
+
+    function finish() {
+      if (done) return;
+      done = true;
+      var text;
+      try { text = build(); } catch (e) { text = 'profiler failed: ' + e + '\n' + e.stack; }
+      console.log(text);
+      var box = document.createElement('div');
+      box.setAttribute('style', 'position:fixed;inset:0;z-index:2147483647;background:#06110f;color:#d8fff2;padding:12px;overflow:auto;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace');
+      var btn = document.createElement('button');
+      btn.textContent = 'Copy report';
+      btn.setAttribute('style', 'position:sticky;top:0;margin-bottom:10px;padding:10px 16px;font:600 14px ui-monospace,Menlo,monospace;background:#00e8f3;color:#06110f;border:0;border-radius:4px;cursor:pointer');
+      var pre = document.createElement('textarea');
+      pre.value = text;
+      pre.setAttribute('readonly', 'readonly');
+      pre.setAttribute('style', 'width:100%;height:78vh;background:transparent;color:inherit;border:1px solid #1e4b47;font:inherit;white-space:pre;padding:8px');
+      btn.onclick = function () {
+        pre.select();
+        pre.setSelectionRange(0, pre.value.length);
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) {}
+        if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { btn.textContent = 'Copied'; }, function () {});
+        else btn.textContent = ok ? 'Copied' : 'Select the text and copy';
+      };
+      box.appendChild(btn);
+      box.appendChild(pre);
+      document.body.appendChild(box);
+    }
+    setTimeout(finish, CAP_MS);
+  })();
+  </script>
   <script src="coi-serviceworker.js"></script>
   <!--
     If you are serving your web app in a path other than the root, change the

@@ -69,6 +69,12 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  assets:
+    # Fonts that gate the boot sequence, served same-origin from the app bundle
+    # instead of fetched from fonts.gstatic.com on the critical path.
+    # google_fonts picks these up automatically by filename.
+    - google_fonts/
+
   # assets:
     # - assets/auchanic_thumbnail.webp
     # - assets/background.webp

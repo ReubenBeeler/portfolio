@@ -2,7 +2,6 @@ import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:portfolio/bootstrapper.dart';
 import 'package:portfolio/widgets/link_text.dart';
 import 'package:portfolio/widgets/parallax_scroller.dart';
@@ -36,9 +35,6 @@ final accentColor = Color(0xFF00E8F3); // Color.lerp(Color(0xFF00FFEE), Color(0x
 const String background_path = "assets/background.webp";
 
 void main() {
-  debugProfileBuildsEnabled = true;
-  debugProfilePaintsEnabled = true;
-
   assert(views.isNotEmpty);
   const String title = "Reuben's Portfolio";
   final loadKey = GlobalKey();
@@ -61,13 +57,14 @@ void main() {
       // theme: ...
       home: Bootstrapper(
         precache: (context) async {
-          for (var view in views) {
-            view.precache?.call();
-          }
+          // These used to be awaited one at a time, which serialised every
+          // download: the loading screen waited for the sum of all of them
+          // instead of the slowest one.
           // TODO merge these images into specific view precache
-          for (var imageProvider in images) {
-            await precacheImage(imageProvider, context);
-          }
+          await Future.wait([
+            for (var view in views) ?view.precache?.call(),
+            for (var imageProvider in images) precacheImage(imageProvider, context),
+          ]);
         },
         child: () => Scaffold(
           key: loadKey, // to prevent re-initializing state immediately after fade-in by bootstrapper
@@ -210,10 +207,18 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
                 children: [
                   ParallaxScroller(
                     parallaxRatio: 0.2,
-                    background: Image.network(
-                      background_path,
-                      fit: BoxFit.fill,
-                      filterQuality: FilterQuality.high,
+                    // RepaintBoundary gives the backdrop its own layer so the
+                    // boot fade-in re-composites it instead of pulling it into
+                    // a full-screen repaint of the page.
+                    // NOTE: filterQuality is left at high deliberately. Dropping
+                    // it to medium only bought ~10% of the fade's frame time in
+                    // measurement, which does not justify a visual change.
+                    background: RepaintBoundary(
+                      child: Image.network(
+                        background_path,
+                        fit: BoxFit.fill,
+                        filterQuality: FilterQuality.high,
+                      ),
                     ),
                     child: SizedBox(
                       width: screenSize.width,
@@ -231,7 +236,7 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
                       alignment: Alignment.centerLeft,
                       child: LinkText(
                         style: TextStyle(color: Colors.white),
-                        line: ['Background photo by ', 'Dalton Beeler', () => launchUrl(Uri.parse('https://dbshots.myportfolio.com/'))],
+                        line: ['Photography by ', 'Dalton Beeler', () => launchUrl(Uri.parse('https://dbshots.myportfolio.com/'))],
                       ),
                     ),
                   ),

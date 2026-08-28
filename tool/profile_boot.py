@@ -108,8 +108,51 @@ INSTRUMENT = r"""
   window.__bootPhase = function (name) {
     name = String(name);
     phases.push([r1(performance.now()), name]);
-    if (name === 'BOOTED') setTimeout(finish, 800);
+    if (name === 'BOOTED') waitForQuiet();
   };
+
+
+  // A resource entry only exists once its request has finished, so a single
+  // large download in flight is indistinguishable from an idle network.
+  // Count requests directly instead.
+  var inflight = 0;
+  try {
+    var _fetch = window.fetch;
+    if (_fetch) window.fetch = function () {
+      inflight++;
+      var dec = function () { inflight--; };
+      var p;
+      try { p = _fetch.apply(this, arguments); } catch (e) { dec(); throw e; }
+      return p.then(function (r) { dec(); return r; }, function (e) { dec(); throw e; });
+    };
+  } catch (e) {}
+  try {
+    var _send = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function () {
+      var self = this;
+      inflight++;
+      var dec = function () { if (!self.__bpCounted) { self.__bpCounted = true; inflight--; } };
+      try { self.addEventListener('loadend', dec); } catch (e) {}
+      try { return _send.apply(this, arguments); } catch (e) { dec(); throw e; }
+    };
+  } catch (e) {}
+
+  // The backdrop and the off-screen thumbnails start downloading at mount and
+  // are still in flight when the boot screen leaves. Reporting 800ms after
+  // handover counted neither their bytes nor the frames they cost.
+  var QUIET_MS = 2500, TAIL_CAP_MS = 30000, tailCapped = false;
+  function waitForQuiet() {
+    var bootedAt = performance.now(), seen = -1, lastChange = bootedAt;
+    (function poll() {
+      if (finished) return;
+      var n = 0, now = performance.now();
+      try { n = performance.getEntriesByType('resource').length; } catch (e) {}
+      if (n !== seen) { seen = n; lastChange = now; }
+      if (inflight === 0 && now - lastChange >= QUIET_MS) return finish();
+      if (now - bootedAt >= TAIL_CAP_MS) { tailCapped = true; return finish(); }
+      setTimeout(poll, 250);
+    })();
+  }
 
   function tick(ts) {
     frames.push(Math.round(ts * 100) / 100);
@@ -162,11 +205,12 @@ INSTRUMENT = r"""
     } catch (e) {}
     try {
       var n = performance.getEntriesByType('navigation')[0];
-      if (n) out.nav = { type: n.type, dcl: r1(n.domContentLoadedEventEnd), load: r1(n.loadEventEnd) };
+      if (n) out.nav = { type: n.type, dcl: r1(n.domContentLoadedEventEnd), load: r1(n.loadEventEnd),
+                         bytes: n.transferSize || n.encodedBodySize || 0 };
     } catch (e) {}
     try {
       performance.getEntriesByType('resource').forEach(function (e) {
-        out.resources.push([r1(e.startTime), r1(e.responseEnd), e.transferSize || e.encodedBodySize || 0, e.name]);
+        out.resources.push([r1(e.startTime), r1(e.responseEnd), e.transferSize || 0, e.name, e.encodedBodySize || 0]);
       });
     } catch (e) {}
     return out;
@@ -198,6 +242,7 @@ INSTRUMENT = r"""
       vw: window.innerWidth,
       vh: window.innerHeight,
       coi: !!window.crossOriginIsolated,
+      tailCapped: tailCapped,
       logs: logs,
       gpu: gpuInfo(),
       paint: t.paint,
@@ -602,6 +647,8 @@ def phase_windows(payload):
     phases = payload.get("phases") or []
     frames = payload.get("frames") or []
     end_of_boot = frames[-1] if frames else payload.get("elapsed", 0)
+    # Gate flags ride the same channel but are events, not spans.
+    phases = [p for p in phases if not str(p[1]).startswith(("flag:", "WATCHDOG"))]
     if phases:
         out = []
         if frames and frames[0] < phases[0][0]:
@@ -611,7 +658,7 @@ def phase_windows(payload):
             # The trailing BOOTED window is the profiler's own rAF loop spinning
             # on an idle app. It is a sanity check: it should read ~16.7 ms on a
             # machine that can hit 60 fps at all.
-            out.append(("BOOTED (idle check)" if name == "BOOTED" else name, t, nxt))
+            out.append(("BOOTED (post-boot tail)" if name == "BOOTED" else name, t, nxt))
         return out, "reported by the app"
 
     # fallback: anchor on the known controller durations
@@ -684,10 +731,10 @@ def boot_stall(payload):
     res = payload.get("resources") or []
     boot_end = None
     engine_start = None
-    for start, end, _size, name in res:
+    for start, end, name in ((r[0], r[1], r[3]) for r in res):
         if name.endswith("flutter_bootstrap.js"):
             boot_end = end if boot_end is None else min(boot_end, end)
-    for start, end, _size, name in res:
+    for start, end, name in ((r[0], r[1], r[3]) for r in res):
         if any(k in name for k in ("canvaskit.js", "canvaskit.wasm", "skwasm",
                                    "main.dart.wasm", "main.dart.js", "main.dart.mjs")):
             engine_start = start if engine_start is None else min(engine_start, start)
@@ -730,17 +777,47 @@ INTERESTING = ("canvaskit", "main.dart.wasm", "main.dart.js", "skwasm",
                ".ttf", ".otf", ".woff", ".webp", "AssetManifest", "FontManifest")
 
 
-def waterfall(payload, limit=22):
+def waterfall(payload, limit=30):
     res = payload.get("resources") or []
     picked = [r for r in res if any(k in r[3] for k in INTERESTING)]
     picked.sort(key=lambda r: r[0])
     lines = []
-    for start, end, size, name in picked[:limit]:
+    for row in picked[:limit]:
+        start, end, size, name = row[0], row[1], row[2], row[3]
+        encoded = row[4] if len(row) > 4 else 0
         short = name.split("/")[-1][:46]
         origin = "local" if "127.0.0.1" in name else name.split("/")[2][:22]
-        kb = f"{size/1024:.0f}K" if size else "-"
+        shown = size if size else encoded
+        kb = f"{shown/1024:.0f}K" if shown else "-"
         lines.append(f"     {start:>8.0f} -> {end:>8.0f}  {kb:>7}  {origin:<22} {short}")
     return lines
+
+
+def fmt_bytes(n):
+    if n >= 1024 * 1024:
+        return f"{n / 1048576:.2f}MB"
+    if n >= 1024:
+        return f"{n / 1024:.0f}K"
+    return f"{n}B"
+
+
+def byte_totals(payload):
+    """Bytes on the wire, and how many of them the boot screen waited on.
+
+    Pre-boot counts every request that had finished by the BOOTED mark, so it
+    is the payload standing between a cold visitor and the actual page.
+    """
+    res = payload.get("resources") or []
+    doc = (payload.get("nav") or {}).get("bytes") or 0
+    booted = next((t for t, n in (payload.get("phases") or []) if n == "BOOTED"), None)
+    # transferSize reads 0 both for a cache hit and for anything a service
+    # worker served, so fall back to the encoded body size.
+    size = lambda r: r[2] if r[2] > 0 else (r[4] if len(r) > 4 else 0)
+    total, count = doc + sum(size(r) for r in res), 1 + len(res)
+    if booted is None:
+        return total, count, None, None
+    pre = [r for r in res if r[1] <= booted]
+    return total, count, doc + sum(size(r) for r in pre), 1 + len(pre)
 
 
 def image_concurrency(payload):
@@ -795,11 +872,27 @@ def summarize_variant(label, results, out):
                    f" | FCP {fcp if fcp is not None else '-'} ms"
                    f" | booted {round(booted) if booted else '-'} ms"
                    f" | frames {len(frames)}")
+        total, count, pre, pren = byte_totals(r)
+        capped = "  <-- still downloading 30s after boot, so total is a floor" if r.get("tailCapped") else ""
+        if pre is None:
+            out.append(f"     bytes: total {fmt_bytes(total)} / {count} requests"
+                       f" | pre-boot n/a (boot never finished){capped}")
+        else:
+            out.append(f"     bytes: total {fmt_bytes(total)} / {count} requests"
+                       f" | pre-boot {fmt_bytes(pre)} / {pren} ({round(100 * pre / total) if total else 0}%)"
+                       f" | after boot {fmt_bytes(total - pre)} / {count - pren}{capped}")
         if ivs:
             wd, wp = worst_frame(r)
             out.append(f"     all frames: p50 {pct(ivs,50):.1f}ms  p90 {pct(ivs,90):.1f}ms"
                        f"  max {max(ivs):.1f}ms  over budget {sum(1 for x in ivs if x>BUDGET)}/{len(ivs)}")
             out.append(f"     worst single frame: {wd:.1f}ms, during {wp}")
+        gates = [p for p in (r.get("phases") or []) if str(p[1]).startswith(("flag:", "WATCHDOG"))]
+        if gates:
+            out.append("     boot gates: " + ", ".join(f"{p[1]}@{round(p[0])}ms" for p in gates))
+        missing = [g for g in ("firstFrameDone", "fontsReady", "childReady", "mountChild", "childLaidOut")
+                   if not any(g in str(p[1]) for p in gates)]
+        if gates and missing:
+            out.append(f"     NEVER OPENED: {', '.join(missing)}  <-- what the boot was waiting on")
         rows, how = phase_stats(r)
         out.append(f"     phases ({how}):")
         out.append(fmt_table(rows))

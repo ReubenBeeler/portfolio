@@ -75,6 +75,17 @@ flutter:
     # google_fonts picks these up automatically by filename.
     - google_fonts/
 
+  fonts:
+    # The family MUST be named exactly "Roboto". SkiaFontCollection.loadAssetFonts
+    # scans FontManifest for a family by that name and, finding none, downloads
+    # Roboto from fonts.gstatic.com as its default fallback face -- and engine
+    # init awaits that download before the first frame. On one profile that
+    # single fetch sat on the critical path for 3473ms. Declaring it here means
+    # the engine already has it and never asks gstatic.
+    - family: Roboto
+      fonts:
+        - asset: google_fonts/Roboto-Regular.ttf
+
   # assets:
     # - assets/auchanic_thumbnail.webp
     # - assets/background.webp

@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:portfolio/bootstrapper.dart';
+import 'package:portfolio/widgets/lazy_image.dart';
 import 'package:portfolio/widgets/link_text.dart';
 import 'package:portfolio/widgets/parallax_scroller.dart';
 import 'package:portfolio/widgets/my_view.dart';
@@ -39,15 +40,12 @@ void main() {
   const String title = "Reuben's Portfolio";
   final loadKey = GlobalKey();
 
+  // Only what the first screen actually shows. Everything else (the backdrop,
+  // the thumbnails, the certificates) loads on its own behind a placeholder,
+  // so the loading screen is never held up by an image nobody is looking at.
   final images = [
-    // maybe don't pre-cache all?
-    NetworkImage('assets/background.webp'),
     NetworkImage('assets/github_logo_clean.webp'),
-    NetworkImage('assets/IBM Applied DevOps Engineering Certificate.webp'),
-    NetworkImage('assets/java_badge.webp'),
-    NetworkImage('assets/keylogging_thumbnail.webp'),
     NetworkImage('assets/linkedin_circle.webp'),
-    NetworkImage('assets/PAOA vs QAOA thumbnail.webp'),
     NetworkImage('assets/profile_pic.webp'),
   ];
   runApp(
@@ -68,6 +66,7 @@ void main() {
         },
         child: () => Scaffold(
           key: loadKey, // to prevent re-initializing state immediately after fade-in by bootstrapper
+          backgroundColor: Colors.black, // shows through until background.webp arrives
           // appBar: AppBar(
           //   backgroundColor: accentColor,
           // ),
@@ -214,10 +213,12 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
                     // it to medium only bought ~10% of the fade's frame time in
                     // measurement, which does not justify a visual change.
                     background: RepaintBoundary(
-                      child: Image.network(
-                        background_path,
+                      child: LazyImage(
+                        image: NetworkImage(background_path),
                         fit: BoxFit.fill,
                         filterQuality: FilterQuality.high,
+                        fadeDuration: const Duration(milliseconds: 600),
+                        placeholder: const ColoredBox(color: Colors.black),
                       ),
                     ),
                     child: SizedBox(

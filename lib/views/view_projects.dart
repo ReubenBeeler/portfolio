@@ -21,6 +21,7 @@ class ViewProjects extends StatelessView {
             child: ThumbnailLinkItem(
               title: 'Remote Keylogging Attacks in Multi-user VR Applications',
               linkUrl: 'https://www.usenix.org/conference/usenixsecurity24/presentation/su-zihao',
+              aspectRatio: 1295 / 614,
               image: NetworkImage('assets/keylogging_thumbnail.webp'),
             ),
           ),
@@ -30,6 +31,7 @@ class ViewProjects extends StatelessView {
             child: ThumbnailLinkItem(
               title: 'Buckshot, a collection of microservices for autonomous wildlife photography',
               linkUrl: 'https://buckshot.reubenbeeler.me/about',
+              aspectRatio: 2730 / 2030,
               image: NetworkImage('assets/buckshot.webp'),
             ),
           ),
@@ -39,6 +41,7 @@ class ViewProjects extends StatelessView {
             child: ThumbnailLinkItem(
               title: 'PAOA vs. QAOA, an optimizer benchmarker on SK Ising models',
               linkUrl: null, // 'https://github.com/ReubenBeeler/PAOA-vs-QAOA',
+              aspectRatio: 800 / 538,
               image: NetworkImage('assets/PAOA vs QAOA thumbnail.webp'),
             ),
           ),

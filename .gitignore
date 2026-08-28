@@ -46,4 +46,5 @@ app.*.map.json
 
 # my stuff
 .test[_.]*
-.archive/
+.archive/boot-profile.json
+boot-profile.txt

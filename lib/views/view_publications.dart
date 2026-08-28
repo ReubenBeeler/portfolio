@@ -18,6 +18,7 @@ class ViewPublications extends StatelessView {
           ThumbnailLinkItem(
             title: 'Remote Keylogging Attacks in Multi-user VR Applications',
             linkUrl: 'https://www.usenix.org/conference/usenixsecurity24/presentation/su-zihao',
+            aspectRatio: 1295 / 614,
             image: NetworkImage('assets/keylogging_thumbnail.webp'),
           ),
         ],

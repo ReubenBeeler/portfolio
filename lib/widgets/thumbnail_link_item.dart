@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:portfolio/main.dart';
+import 'package:portfolio/widgets/lazy_image.dart';
 import 'package:portfolio/widgets/my_card.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -49,36 +50,42 @@ class PublicationsDemo extends StatelessWidget {
             const ThumbnailLinkItem(
               title: 'Machine Learning in Healthcare: A Comprehensive Review',
               linkUrl: 'https://example.com/ml-healthcare-paper',
+              aspectRatio: 600 / 400,
               image: NetworkImage('https://images.unsplash.com/photo-1559757148-5c350d0d3c56?w=600&h=400&fit=crop&crop=center'),
             ),
             const SizedBox(height: 24),
             const ThumbnailLinkItem(
               title: 'Sustainable Energy Systems: Future Perspectives',
               linkUrl: 'https://example.com/energy-systems-paper',
+              aspectRatio: 600 / 400,
               image: NetworkImage('https://images.unsplash.com/photo-1473341304170-971dccb5ac1e?w=600&h=400&fit=crop&crop=center'),
             ),
             const SizedBox(height: 24),
             const ThumbnailLinkItem(
               title: 'Neural Networks for Climate Prediction',
               linkUrl: 'https://example.com/neural-climate-paper',
+              aspectRatio: 600 / 400,
               image: NetworkImage('https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=600&h=400&fit=crop&crop=center'),
             ),
             const SizedBox(height: 24),
             const ThumbnailLinkItem(
               title: 'Quantum Computing in Cryptography',
               linkUrl: 'https://example.com/quantum-crypto-paper',
+              aspectRatio: 600 / 400,
               image: NetworkImage('https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=600&h=400&fit=crop&crop=center'),
             ),
             const SizedBox(height: 24),
             const ThumbnailLinkItem(
               title: 'Data Science Applications in Modern Biology',
               linkUrl: 'https://example.com/biology-data-paper',
+              aspectRatio: 600 / 400,
               image: NetworkImage('https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?w=600&h=400&fit=crop&crop=center'),
             ),
             const SizedBox(height: 24),
             const ThumbnailLinkItem(
               title: 'Advanced Algorithms for Financial Markets',
               linkUrl: 'https://example.com/finance-algorithms-paper',
+              aspectRatio: 600 / 400,
               image: NetworkImage('https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=600&h=400&fit=crop&crop=center'),
             ),
           ],
@@ -142,12 +149,17 @@ class ThumbnailLinkItem extends StatelessWidget {
   final String? linkUrl;
   final ImageProvider image;
 
+  /// The thumbnail's intrinsic width / height. Given up front so the card
+  /// occupies its final height before the image has downloaded.
+  final double aspectRatio;
+
   const ThumbnailLinkItem({
     super.key,
     this.inProgress = false,
     required this.title,
     required this.linkUrl,
     required this.image,
+    required this.aspectRatio,
   });
 
   @override
@@ -237,18 +249,15 @@ class ThumbnailLinkItem extends StatelessWidget {
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Image(
+                  child: LazyImage(
                     image: image,
-                    width: double.infinity,
+                    aspectRatio: aspectRatio,
                     fit: BoxFit.cover,
+                    deferUntilBooted: true,
+                    decodeToFit: true,
                     errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        width: double.infinity,
-                        height: 250,
-                        decoration: BoxDecoration(
-                          color: Colors.grey[200],
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                      return ColoredBox(
+                        color: Colors.grey[200]!,
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -267,23 +276,6 @@ class ThumbnailLinkItem extends StatelessWidget {
                               ),
                             ),
                           ],
-                        ),
-                      );
-                    },
-                    loadingBuilder: (context, child, loadingProgress) {
-                      if (loadingProgress == null) return child;
-                      return Container(
-                        width: double.infinity,
-                        height: 250,
-                        decoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Center(
-                          child: CircularProgressIndicator(
-                            value: loadingProgress.expectedTotalBytes != null ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes! : null,
-                            strokeWidth: 2,
-                          ),
                         ),
                       );
                     },

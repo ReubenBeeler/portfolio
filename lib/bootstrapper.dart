@@ -8,6 +8,14 @@ import 'util/boot_trace.dart';
 import 'util/miscellaneous.dart';
 import 'util/state_machine.dart';
 
+/// True once the boot screen has handed over.
+///
+/// Anything below the fold waits for this. Downloading and decoding an image
+/// nobody can see yet costs main-thread and raster time during the hand-over,
+/// which is the one second of the whole boot where a person is actually
+/// watching something move.
+final ValueNotifier<bool> appBooted = ValueNotifier(false);
+
 late ValueNotifier<Offset> mouseGlobalPosition;
 bool _setMouseGlobalPosition = false;
 
@@ -63,6 +71,15 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
   bool _fadeInChild = false;
   bool _fadeStarted = false;
 
+  /// True when index.html is running the loading animation. Then Dart's own
+  /// FLY_IN/WAITING/FLY_OUT never run: nothing Dart draws can appear until the
+  /// engine and app binary have downloaded, which is seconds into a cold load,
+  /// so the animation was invisible to the visitors it exists for. Dart still
+  /// owns the fade from black to the page.
+  bool _htmlSplash = false;
+  bool _splashSignalled = false;
+  bool _splashGone = false;
+
   static const Duration _kFlyInDuration = Duration(milliseconds: 1300);
   static const Duration _kFlyOutDuration = Duration(milliseconds: 1300);
   static const Duration _kFadeDuration = Duration(seconds: 1);
@@ -74,9 +91,19 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
   /// it to hand over sooner.
   static const double _kFadeOverlap = 0.5;
 
+  /// Long enough that a slow phone on a slow link finishes normally, short
+  /// enough that nobody watches a stuck loading screen. See [_forceBoot].
+  static const Duration _kBootWatchdog = Duration(seconds: 20);
+  Timer? _watchdog;
+
   late final _stateMachine =
       StateMachine(BootState.SPLASH, {
-          BootState.SPLASH: () => _firstFrameDone && _fontsReady ? BootState.FLY_IN : null,
+          // Deliberately not gated on fonts: the splash draws in SplashRoboto,
+          // which the engine has already loaded by the time the first frame
+          // runs, so waiting on google_fonts here only bought a black screen.
+          BootState.SPLASH: () => _htmlSplash
+              ? (_splashGone ? BootState.FADE_IN_CHILD : null)
+              : (_firstFrameDone ? BootState.FLY_IN : null),
           BootState.FLY_IN: () => _flyInDone ? BootState.WAITING : null,
           // BootState.WAITING: () {
           //   // timerDone represents minimum time here
@@ -85,7 +112,9 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
           //     return BootState.FLY_OUT;
           //   }
           // },
-          BootState.WAITING: () => _childReady && _childLaidOut ? BootState.FLY_OUT : null,
+          // _fontsReady moved here from SPLASH: the page behind the splash must
+          // not reflow after handover, but the splash itself need not wait.
+          BootState.WAITING: () => _childReady && _childLaidOut && _fontsReady ? BootState.FLY_OUT : null,
           // BootState.WAITING_FOR_MOUSE: () => _mouseReady ? BootState.FLY_OUT : null,
           BootState.FLY_OUT: () => _flyOutDone ? BootState.FADE_IN_CHILD : null,
           BootState.FADE_IN_CHILD: () => _fadeInChild ? BootState.BOOTED : null,
@@ -131,6 +160,8 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
       case BootState.FLY_OUT:
         controllerRestart(_flyOutController, _kFlyOutDuration, () => _flyOutDone = true);
         _armFadeOverlap();
+      case BootState.BOOTED:
+        appBooted.value = true;
       case BootState.FADE_IN_CHILD:
         // Normally already running: the overlap starts it partway through
         // FLY_OUT. This only fires it if the overlap somehow did not.
@@ -138,6 +169,50 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
         if (_fadeInChild) _stateMachine.update();
       case _:
     }
+  }
+
+  /// Sets a boot gate and reports it, so `?profile` shows which gate a stalled
+  /// boot is waiting on instead of leaving it to guesswork.
+  void _setFlag(String name, VoidCallback set) {
+    set();
+    reportBootPhase('flag:$name');
+    _maybeMountChild();
+    _maybeSignalSplash();
+    _stateMachine.update();
+  }
+
+  /// Everything the page needs before it is worth revealing.
+  bool get _pageReady => _firstFrameDone && _fontsReady && _childReady && _childLaidOut;
+
+  /// Hands the page-side splash its cue. It flies the letters out over an
+  /// opaque black backdrop and calls back when they are gone.
+  void _maybeSignalSplash() {
+    if (!_htmlSplash || _splashSignalled || !_pageReady) return;
+    _splashSignalled = true;
+    reportBootPhase('flag:splashCue');
+    bootSplashFlyOut();
+  }
+
+  /// A loading screen that never ends is worse than a page with a missing
+  /// image. If anything we gate on never arrives, force the boot forward.
+  void _forceBoot() {
+    _watchdog = null;
+    if (!mounted || state == BootState.BOOTED) return;
+    reportBootPhase('WATCHDOG:${state.name}');
+    _firstFrameDone = true;
+    _fontsReady = true;
+    _childReady = true;
+    if (_htmlSplash) {
+      bootSplashFlyOut(); // get the letters off the screen even if it never called back
+      _splashGone = true;
+    }
+    if (!_mountChild) setState(() => _mountChild = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _childLaidOut = true;
+      _stateMachine.update();
+    });
+    _stateMachine.update();
   }
 
   /// Starts the fade once FLY_OUT is [_kFadeOverlap] of the way through, so the
@@ -166,11 +241,16 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
   /// asset already precached, then lets WAITING -> FLY_OUT wait one frame for it
   /// to lay out. Mounting earlier would drag that layout into the fly-in.
   void _maybeMountChild() {
-    if (_mountChild || !_childReady || state != BootState.WAITING) return;
+    // With the page-side splash there is no WAITING state to spend the layout
+    // in, so spend it in SPLASH instead. Either way it happens behind an opaque
+    // backdrop, before anything animates.
+    if (_mountChild || !_childReady) return;
+    if (state != (_htmlSplash ? BootState.SPLASH : BootState.WAITING)) return;
     setState(() => _mountChild = true);
+    reportBootPhase('flag:mountChild');
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _childLaidOut = true;
-      _stateMachine.update();
+      if (!mounted) return;
+      _setFlag('childLaidOut', () => _childLaidOut = true);
     });
   }
 
@@ -194,21 +274,31 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
   @override
   void initState() {
     super.initState();
+    _watchdog = Timer(_kBootWatchdog, _forceBoot);
+    runOnDispose(() => _watchdog?.cancel());
 
+    _htmlSplash = bootSplashPresent();
+    if (_htmlSplash) {
+      onBootSplashDone(() {
+        if (!mounted) return;
+        _setFlag('splashGone', () => _splashGone = true);
+      });
+    }
+
+    // onError matters: a bare .then() here meant any font failure left
+    // _fontsReady false forever, and the splash never advanced. A missing font
+    // should degrade to a fallback face, not hang the boot.
     GoogleFonts.pendingFonts([
       GoogleFonts.roboto(),
-    ]).then((_) {
-      _fontsReady = true;
-      _stateMachine.update();
-    });
+    ]).then(
+      (_) => _setFlag('fontsReady', () => _fontsReady = true),
+      onError: (Object _) => _setFlag('fontsReady(failed)', () => _fontsReady = true),
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _firstFrameDone = true;
-      _stateMachine.update();
+      _setFlag('firstFrameDone', () => _firstFrameDone = true);
       widget.precache?.call(context).whenComplete(() {
-        _childReady = true;
-        _maybeMountChild();
-        _stateMachine.update();
+        _setFlag('childReady', () => _childReady = true);
       });
     });
   }
@@ -292,29 +382,40 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
     // overlap begins the fade partway through FLY_OUT. Until then the child
     // stays at Opacity(0) and is not painted at all.
     final bool childVisible = _fadeStarted || state == BootState.BOOTED;
-    // Opacity 0 lays the child out but makes RenderOpacity skip painting it
-    // entirely, so mounting it early buys the layout without paying paint cost
-    // on every frame of the loading animation.
+    // Opacity(0) makes RenderOpacity skip painting the child altogether, so the
+    // page's first paint (shaders, image textures, text rasterisation) landed
+    // on the first frame of the fade. With the animation now owned by the page,
+    // Dart has nothing else to draw during the splash, so paint it there
+    // instead: it sits under an opaque backdrop and nobody sees it.
+    final bool childPainted = childVisible || (_htmlSplash && _mountChild);
     final Widget? childLayer = _mountChild
         ? TickerMode(
             enabled: childVisible,
             child: Opacity(
-              opacity: childVisible ? 1.0 : 0.0,
+              opacity: childPainted ? 1.0 : 0.0,
               child: IgnorePointer(ignoring: !childVisible, child: _child),
             ),
           )
         : null;
     final Widget backdrop = SizedBox.expand(child: ColoredBox(color: widget.backgroundColor));
-    // Opaque until _beginFadeIn runs the controller, then an opacity layer.
-    // FadeTransition drives compositing instead of rebuilding a ColoredBox with
-    // a new colour every frame.
+    // A translucent rectangle, not an opacity layer. FadeTransition pushed a
+    // full-screen OpacityLayer every frame, which means rendering the page into
+    // an offscreen texture and blending it back; across a 3774x2041 viewport
+    // that is a lot of fill rate for what is ultimately one alpha blend. The
+    // long frames during this phase reported ~0ms of main-thread blocking,
+    // which is what a GPU-bound fade looks like.
+    // ColoredBox is opaque to hit testing, so not ignoring it absorbs pointers
+    // the way the old AbsorbPointer did.
     final Widget fadingBackdrop = AnimatedBuilder(
       animation: _fadeInChildController,
-      child: FadeTransition(
-        opacity: ReverseAnimation(_fadeInChildController),
-        child: backdrop,
+      builder: (_, _) => IgnorePointer(
+        ignoring: _fadeInChildController.value >= 0.2,
+        child: SizedBox.expand(
+          child: ColoredBox(
+            color: widget.backgroundColor.withValues(alpha: 1.0 - _fadeInChildController.value),
+          ),
+        ),
       ),
-      builder: (_, child) => _fadeInChildController.value < 0.2 ? AbsorbPointer(child: child) : IgnorePointer(child: child),
     );
 
     List<Widget> stack;
@@ -443,7 +544,11 @@ class _FlyingTextState extends State<FlyingText> {
 
     _disposeCurves();
 
-    final style = GoogleFonts.roboto(
+    // Bundled and declared in pubspec, so it is ready before the first frame.
+    // GoogleFonts.roboto() here meant the splash could not draw until a runtime
+    // font fetch resolved, which cost seconds of black screen on a cold load.
+    final style = TextStyle(
+      fontFamily: 'Roboto',
       color: widget.color,
       fontSize: min(screenSize.width * 0.15, screenSize.height * 0.4),
     );

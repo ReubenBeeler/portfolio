@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:portfolio/widgets/lazy_image.dart';
 import 'package:portfolio/widgets/my_view.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -31,14 +32,22 @@ class ViewCertifications extends StatelessView {
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
-                    icon: Image.network("assets/IBM Applied DevOps Engineering Certificate.webp"),
+                    icon: ConstrainedBox(
+                      // the badge is 600x600; matches how Image sized itself before
+                      constraints: const BoxConstraints(maxWidth: 600, maxHeight: 600),
+                      child: LazyImage(image: NetworkImage("assets/IBM Applied DevOps Engineering Certificate.webp"), aspectRatio: 1, fit: BoxFit.contain, deferUntilBooted: true),
+                    ),
                     onPressed: () => launchUrl(Uri.parse("https://www.credly.com/badges/b3e055ee-ed80-441a-abcf-10bd80ed8d8f/public_url")),
                   ),
                 ),
                 SizedBox(
                   height: 0.5 * screenSize.height,
                   child: IconButton(
-                    icon: Image.network("assets/java_badge.webp"),
+                    icon: ConstrainedBox(
+                      // the badge is 600x600; matches how Image sized itself before
+                      constraints: const BoxConstraints(maxWidth: 600, maxHeight: 600),
+                      child: LazyImage(image: NetworkImage("assets/java_badge.webp"), aspectRatio: 1, fit: BoxFit.contain, deferUntilBooted: true),
+                    ),
                     onPressed: () => launchUrl(Uri.parse("https://www.credly.com/badges/d2f3e39d-df46-4e1d-af16-4c3aae7bcbda/public_url")),
                   ),
                 ),

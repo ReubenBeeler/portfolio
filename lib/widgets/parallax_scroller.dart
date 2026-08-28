@@ -145,105 +145,210 @@ class ParallaxScroller extends StatefulWidget {
 }
 
 class ParallaxScrollerState extends State<ParallaxScroller> {
-  ScrollableState? _scrollableState;
+  ScrollPosition? _position;
   late Axis _scrollAxis;
   final ValueNotifier<double> _pixels = ValueNotifier(0);
 
-  void scrollListener() => _pixels.value = _scrollableState!.position.pixels;
+  void scrollListener() => _pixels.value = _position!.pixels;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _scrollableState?.position.removeListener(scrollListener);
-    _scrollableState = Scrollable.maybeOf(context);
-    assert(_scrollableState != null, "ParallaxScroller must be a child of a ScrollView!");
-    _scrollableState!.position.addListener(scrollListener);
-    _scrollAxis = _scrollableState!.position.axis;
+    final scrollable = Scrollable.maybeOf(context);
+    assert(scrollable != null, "ParallaxScroller must be a child of a ScrollView!");
+    if (scrollable!.position != _position) {
+      _position?.removeListener(scrollListener);
+      _position = scrollable.position..addListener(scrollListener);
+    }
+    _scrollAxis = _position!.axis;
+    _pixels.value = _position!.pixels;
   }
 
   @override
   void dispose() {
-    _scrollableState?.position.removeListener(scrollListener);
+    _position?.removeListener(scrollListener);
+    _pixels.dispose();
     super.dispose();
   }
 
   @override
-  void initState() {
-    super.initState();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) => setState(() {})); // God I fucking hate this
-  }
-
-  @override
   Widget build(BuildContext context) {
-    double? scrollViewLength = _scrollableState!.position.hasViewportDimension ? _scrollableState!.position.viewportDimension : null;
-    return Stack(
+    final Size screenSize = MediaQuery.sizeOf(context);
+    return _ParallaxLayout(
+      axis: _scrollAxis,
+      parallaxRatio: widget.parallaxRatio,
+      position: _position!,
+      // Only used before the viewport has ever reported its own extent, i.e. on
+      // the very first layout. Sizing the backdrop a frame late is what used to
+      // make it jump.
+      fallbackViewportLength: _scrollAxis == Axis.horizontal ? screenSize.width : screenSize.height,
       children: [
-        if (scrollViewLength != null)
-          Positioned.fill(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final scrollLength = _scrollAxis == Axis.horizontal ? constraints.maxWidth : constraints.maxHeight;
-                final parallaxLength = scrollViewLength + widget.parallaxRatio * (scrollLength - scrollViewLength);
-                return ValueListenableBuilder(
-                  valueListenable: _pixels,
-                  builder: (BuildContext context, double pixels, Widget? background) {
-                    double offset = pixels * (1 - widget.parallaxRatio);
-                    return Transform.translate(
-                      offset: Offset(
-                        _scrollAxis == Axis.horizontal ? offset : 0,
-                        _scrollAxis == Axis.horizontal ? 0 : offset,
-                      ),
-                      child: background,
-                    );
-                  },
-                  child: Flex(
-                    direction: _scrollAxis,
-                    children: [
-                      SizedBox.fromSize(
-                        size: _scrollAxis == Axis.horizontal ? Size(parallaxLength, constraints.maxHeight) : Size(constraints.maxWidth, parallaxLength),
-                        child: widget.background,
-                      ),
-                      Spacer(),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        MeasureSize(
-          // axis: _scrollAxis, //
-          onChange: (_) => WidgetsBinding.instance.addPostFrameCallback((_) => setState(() {})), // cuz background is 1 frame delayed...
-          child: widget.child,
+        widget.child,
+        ValueListenableBuilder<double>(
+          valueListenable: _pixels,
+          builder: (context, pixels, background) {
+            final double offset = pixels * (1 - widget.parallaxRatio);
+            return Transform.translate(
+              offset: _scrollAxis == Axis.horizontal ? Offset(offset, 0) : Offset(0, offset),
+              child: background,
+            );
+          },
+          child: widget.background,
         ),
       ],
     );
   }
 }
 
-class MeasureSize extends SingleChildRenderObjectWidget {
-  final void Function(Size? size) onChange;
-  final Axis? axis;
+/// Lays the backdrop out from the content's measured size in the *same* layout
+/// pass. Children are `[content, background]`.
+class _ParallaxLayout extends MultiChildRenderObjectWidget {
+  final Axis axis;
+  final double parallaxRatio;
+  final ScrollPosition position;
+  final double fallbackViewportLength;
 
-  const MeasureSize({super.key, required this.onChange, required Widget child, this.axis}) : super(child: child);
+  const _ParallaxLayout({
+    required this.axis,
+    required this.parallaxRatio,
+    required this.position,
+    required this.fallbackViewportLength,
+    required super.children,
+  });
 
   @override
-  RenderObject createRenderObject(BuildContext context) => _RenderMeasureSize(onChange, axis);
+  RenderObject createRenderObject(BuildContext context) => _RenderParallaxLayout(
+    axis: axis,
+    parallaxRatio: parallaxRatio,
+    position: position,
+    fallbackViewportLength: fallbackViewportLength,
+  );
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderParallaxLayout renderObject) {
+    renderObject
+      ..axis = axis
+      ..parallaxRatio = parallaxRatio
+      ..position = position
+      ..fallbackViewportLength = fallbackViewportLength;
+  }
 }
 
-class _RenderMeasureSize extends RenderProxyBox {
-  final void Function(Size? size) onChange;
-  final Axis? axis;
+class _ParallaxParentData extends ContainerBoxParentData<RenderBox> {}
 
-  _RenderMeasureSize(this.onChange, this.axis);
+class _RenderParallaxLayout extends RenderBox with ContainerRenderObjectMixin<RenderBox, _ParallaxParentData>, RenderBoxContainerDefaultsMixin<RenderBox, _ParallaxParentData> {
+  _RenderParallaxLayout({
+    required Axis axis,
+    required double parallaxRatio,
+    required ScrollPosition position,
+    required double fallbackViewportLength,
+  }) : _axis = axis,
+       _parallaxRatio = parallaxRatio,
+       _position = position,
+       _fallbackViewportLength = fallbackViewportLength;
 
-  Size? oldSize;
+  Axis _axis;
+  set axis(Axis value) {
+    if (_axis == value) return;
+    _axis = value;
+    markNeedsLayout();
+  }
+
+  double _parallaxRatio;
+  set parallaxRatio(double value) {
+    if (_parallaxRatio == value) return;
+    _parallaxRatio = value;
+    markNeedsLayout();
+  }
+
+  ScrollPosition _position;
+  set position(ScrollPosition value) {
+    if (_position == value) return;
+    _position = value;
+    markNeedsLayout();
+  }
+
+  double _fallbackViewportLength;
+  set fallbackViewportLength(double value) {
+    if (_fallbackViewportLength == value) return;
+    _fallbackViewportLength = value;
+    markNeedsLayout();
+  }
+
+  double _usedViewportLength = double.nan;
+  bool _recheckScheduled = false;
+  final LayerHandle<ClipRectLayer> _clipHandle = LayerHandle<ClipRectLayer>();
+
+  RenderBox get _content => firstChild!;
+  RenderBox get _background => lastChild!;
+
+  double get _viewportLength => _position.hasViewportDimension ? _position.viewportDimension : _fallbackViewportLength;
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _ParallaxParentData) child.parentData = _ParallaxParentData();
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) => _content.getMinIntrinsicWidth(height);
+  @override
+  double computeMaxIntrinsicWidth(double height) => _content.getMaxIntrinsicWidth(height);
+  @override
+  double computeMinIntrinsicHeight(double width) => _content.getMinIntrinsicHeight(width);
+  @override
+  double computeMaxIntrinsicHeight(double width) => _content.getMaxIntrinsicHeight(width);
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) => constraints.constrain(_content.getDryLayout(constraints));
+
   @override
   void performLayout() {
-    super.performLayout();
-    Size? newSize = child?.size;
-    if ((axis == null && oldSize != newSize) || (axis == Axis.horizontal && oldSize?.width != newSize?.width) || (axis == Axis.vertical && oldSize?.height != newSize?.height)) {
-      onChange(oldSize = newSize);
-    }
+    _content.layout(constraints, parentUsesSize: true);
+    size = constraints.constrain(_content.size);
+
+    final double viewportLength = _usedViewportLength = _viewportLength;
+    final double contentLength = _axis == Axis.horizontal ? size.width : size.height;
+    // Long enough that the backdrop still covers the viewport at full scroll,
+    // given that it only travels `parallaxRatio` as far as the content does.
+    final double backgroundLength = max(viewportLength, viewportLength + _parallaxRatio * (contentLength - viewportLength));
+    _background.layout(
+      BoxConstraints.tight(_axis == Axis.horizontal ? Size(backgroundLength, size.height) : Size(size.width, backgroundLength)),
+    );
+
+    _scheduleViewportRecheck();
+  }
+
+  /// The viewport publishes its extent *after* we lay out, so the first layout
+  /// of a scroll view runs on the fallback. Re-run only if it was actually
+  /// wrong, which also covers a window resize.
+  void _scheduleViewportRecheck() {
+    if (_recheckScheduled) return;
+    _recheckScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _recheckScheduled = false;
+      if (!attached) return;
+      if (_position.hasViewportDimension && _position.viewportDimension != _usedViewportLength) markNeedsLayout();
+    });
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    _clipHandle.layer = context.pushClipRect(
+      needsCompositing,
+      offset,
+      Offset.zero & size,
+      (PaintingContext context, Offset offset) => context.paintChild(_background, offset),
+      oldLayer: _clipHandle.layer,
+    );
+    context.paintChild(_content, offset);
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) => _content.hitTest(result, position: position);
+
+  @override
+  void dispose() {
+    _clipHandle.layer = null;
+    super.dispose();
   }
 }

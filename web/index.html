@@ -49,7 +49,8 @@
   <script>
   (function () {
     if (!/(^|[?&])profile\b/.test(location.search)) return;
-    var t0 = performance.now(), frames = [], loaf = [], phases = [], logs = [], done = false, tailCapped = false;
+    var t0 = performance.now(), frames = [], loaf = [], phases = [], logs = [], events = [], done = false, tailCapped = false;
+    var INTERACT_MS = 12000, interactFrom = null;
     var CAP_MS = 120000;
     var NAV = 'bootprofile:navs';
     var navs = (parseInt(sessionStorage.getItem(NAV) || '0', 10) || 0) + 1;
@@ -111,10 +112,24 @@
         var n = 0, now = performance.now();
         try { n = performance.getEntriesByType('resource').length; } catch (e) {}
         if (n !== seen) { seen = n; lastChange = now; }
-        if (inflight === 0 && now - lastChange >= QUIET_MS) return finish();
-        if (now - bootedAt >= TAIL_CAP_MS) { tailCapped = true; return finish(); }
+        if (inflight === 0 && now - lastChange >= QUIET_MS) return interact();
+        if (now - bootedAt >= TAIL_CAP_MS) { tailCapped = true; return interact(); }
         setTimeout(poll, 250);
       })();
+    }
+
+    // Frame timings after hand-over say nothing while the page sits still:
+    // Flutter is not rendering, so every tick is 16.7ms by default. Ask for
+    // real input and measure what it costs.
+    function interact() {
+      if (done || interactFrom !== null) return;
+      interactFrom = performance.now();
+      var tag = document.createElement('div');
+      tag.textContent = 'PROFILING: scroll and click around for ' + (INTERACT_MS / 1000) + 's -- the report follows';
+      tag.setAttribute('style', 'position:fixed;left:0;right:0;top:0;z-index:2147483646;pointer-events:none;' +
+        'background:#00e8f3;color:#06110f;font:600 14px ui-monospace,Menlo,Consolas,monospace;padding:8px;text-align:center');
+      document.body.appendChild(tag);
+      setTimeout(function () { try { tag.remove(); } catch (e) {} finish(); }, INTERACT_MS);
     }
     (function tick(ts) { frames.push(ts); if (!done) requestAnimationFrame(tick); })(performance.now());
 
@@ -129,6 +144,22 @@
       new PerformanceObserver(function (l) {
         l.getEntries().forEach(function (e) { loaf.push([r1(e.startTime), r1(e.duration), r1(e.blockingDuration || 0)]); });
       }).observe({ type: 'long-animation-frame', buffered: true });
+    } catch (e) {}
+
+    // Event Timing. A slow click has three quite different possible causes and
+    // this is the only thing that tells them apart: the main thread was already
+    // busy when the input arrived (input delay), the handler itself was slow
+    // (processing), or the frame showing the result took forever to reach the
+    // screen (presentation).
+    try {
+      new PerformanceObserver(function (l) {
+        l.getEntries().forEach(function (e) {
+          if (events.length > 200) return;
+          events.push([r1(e.startTime), e.name, r1(e.processingStart - e.startTime),
+                       r1(e.processingEnd - e.processingStart),
+                       r1(e.startTime + e.duration - e.processingEnd), r1(e.duration)]);
+        });
+      }).observe({ type: 'event', buffered: true, durationThreshold: 16 });
     } catch (e) {}
 
     function pct(a, p) { if (!a.length) return 0; var s = a.slice().sort(function (x, y) { return x - y; }); return s[Math.min(s.length - 1, Math.round(p / 100 * (s.length - 1)))]; }
@@ -270,6 +301,36 @@
                  pad(sizeOf(r) ? Math.round(sizeOf(r) / 1024) + 'K' : '-', 8, true) + '  ' + pad(origin, 22) + ' ' +
                  decodeURIComponent(r[3].split('/').pop()).slice(0, 42));
       });
+
+      if (interactFrom !== null) {
+        var during = frames.filter(function (f) { return f >= interactFrom; });
+        var iv = [];
+        for (var i = 1; i < during.length; i++) iv.push(during[i] - during[i - 1]);
+        out.push('');
+        out.push('interaction window (' + Math.round(INTERACT_MS / 1000) + 's of scrolling and clicking after hand-over):');
+        out.push('  frames: ' + iv.length + '  p50 ' + (iv.length ? pct(iv, 50).toFixed(1) : '-') +
+                 'ms  p90 ' + (iv.length ? pct(iv, 90).toFixed(1) : '-') +
+                 'ms  max ' + (iv.length ? Math.max.apply(null, iv).toFixed(1) : '-') +
+                 'ms  over 16.7ms ' + iv.filter(function (x) { return x > 16.7; }).length + '/' + iv.length);
+        var ev = events.filter(function (e) { return e[0] >= interactFrom; })
+                       .sort(function (a, b) { return b[5] - a[5]; });
+        if (!ev.length) {
+          out.push('  no input recorded -- if you did scroll and click, the Event Timing API is missing here');
+        } else {
+          out.push('  slowest inputs (total = waiting + handler + presenting):');
+          out.push('  ' + pad('event', 16) + pad('total', 9, true) + pad('waiting', 9, true) +
+                   pad('handler', 9, true) + pad('presenting', 12, true));
+          ev.slice(0, 10).forEach(function (e) {
+            out.push('  ' + pad(e[1], 16) + pad(e[5] + 'ms', 9, true) + pad(e[2] + 'ms', 9, true) +
+                     pad(e[3] + 'ms', 9, true) + pad(e[4] + 'ms', 12, true));
+          });
+          var worst = ev[0];
+          var blame = worst[2] >= worst[3] && worst[2] >= worst[4] ? 'waiting for a busy main thread'
+                    : worst[3] >= worst[4] ? 'the Dart handler itself'
+                    : 'presenting the frame (raster / GPU)';
+          out.push('  worst input spent most of its time: ' + blame);
+        }
+      }
 
       var warn = logs.filter(function (l) { return /prepareServiceWorker|CPU-only|webGLVersion|Reloading page|COEP|COOP/.test(l); });
       if (warn.length) { out.push(''); out.push('notable console output:'); warn.slice(0, 8).forEach(function (l) { out.push('  ' + l); }); }

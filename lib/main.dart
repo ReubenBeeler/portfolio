@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:portfolio/bootstrapper.dart';
 import 'package:portfolio/widgets/lazy_image.dart';
@@ -91,45 +92,45 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
   final GlobalKey _firstScreenKey = GlobalKey();
   late double _inlineNavBarHeight;
   late double _overlayNavBarHeight;
-  bool _doNavBarOverlay = false;
-  double? _currentNavBarTop;
-  double? _currentNavBarHeight;
-  double _navBarFrac = 0;
+
+  // Scroll-driven nav bar geometry.
+  //
+  // These were fields written from a post-frame setState on every scroll
+  // notification, so every frame of every scroll rebuilt this widget -- the
+  // whole page, nav bar and all -- and applied the result one frame late. As
+  // listenables only the bar itself rebuilds, in the same frame as the scroll.
+  final ValueNotifier<bool> _doNavBarOverlay = ValueNotifier(false);
+  final ValueNotifier<double> _navBarTop = ValueNotifier(0);
+  final ValueNotifier<double> _navBarHeight = ValueNotifier(0);
+  final ValueNotifier<double> _navBarFrac = ValueNotifier(0);
+  late final Listenable _navBarGeometry = Listenable.merge([_navBarTop, _navBarHeight]);
 
   void _updateNavBarListener() {
     double? homeBottom = getBottomFromRenderBox(views.first.globalKey);
     double? inlineNavBarTop = getTopFromRenderBox(_inlineNavBarKey);
     double? screenHeight = MediaQuery.maybeHeightOf(context);
-    if (homeBottom != null && inlineNavBarTop != null && screenHeight != null) {
-      double x, minHeight, maxHeight;
-      // if (_inlineNavBarHeight < _overlayNavBarHeight) {
-      //   // expand once inline navbar leaves floor
-      //   x = screenHeight - homeBottom;
-      //   minHeight = _inlineNavBarHeight;
-      //   maxHeight = _overlayNavBarHeight;
-      // }
-      assert(_overlayNavBarHeight < _inlineNavBarHeight);
-      // shrink once inline navbar hits ceiling
-      x = inlineNavBarTop + _inlineNavBarHeight; // inlineNavBarBottom
-      minHeight = _overlayNavBarHeight;
-      maxHeight = _inlineNavBarHeight;
+    if (homeBottom == null || inlineNavBarTop == null || screenHeight == null) return;
 
-      bool doNavBarOverlay = homeBottom < 0; // _controller.position.hasPixels && _controller.position.pixels > 0;
-      double currentNavBarTop = max(inlineNavBarTop, 0.0);
-      double currentNavBarHeight = clampDouble(x, minHeight, maxHeight);
-      double navBarFrac = clampDouble((maxHeight - x) / (maxHeight - minHeight), 0, 1);
+    assert(_overlayNavBarHeight < _inlineNavBarHeight);
+    // shrink once inline navbar hits ceiling
+    final double x = inlineNavBarTop + _inlineNavBarHeight; // inlineNavBarBottom
+    final double minHeight = _overlayNavBarHeight;
+    final double maxHeight = _inlineNavBarHeight;
 
-      if (_doNavBarOverlay != doNavBarOverlay || _currentNavBarTop != currentNavBarTop || _currentNavBarHeight != currentNavBarHeight || _navBarFrac != navBarFrac) {
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => setState(() {
-            _doNavBarOverlay = doNavBarOverlay;
-            _currentNavBarTop = currentNavBarTop;
-            _currentNavBarHeight = currentNavBarHeight;
-            _navBarFrac = navBarFrac;
-          }),
-        ); // TODO replace with listenables
-      }
-    }
+    _doNavBarOverlay.value = homeBottom < 0;
+    _navBarTop.value = max(inlineNavBarTop, 0.0);
+    _navBarHeight.value = clampDouble(x, minHeight, maxHeight);
+    _navBarFrac.value = clampDouble((maxHeight - x) / (maxHeight - minHeight), 0, 1);
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_updateNavBarListener);
+    _doNavBarOverlay.dispose();
+    _navBarTop.dispose();
+    _navBarHeight.dispose();
+    _navBarFrac.dispose();
+    super.dispose();
   }
 
   @override
@@ -163,7 +164,15 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
                 SizedBox(
                   key: _inlineNavBarKey,
                   height: _inlineNavBarHeight,
-                  child: _doNavBarOverlay ? null : navBar,
+                  // While it lives here it is inside the scroll view, so a
+                  // wheel over it still scrolls the page. It only moves to the
+                  // overlay once it has to stick, and that flip happens once,
+                  // not on every scroll frame.
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: _doNavBarOverlay,
+                    builder: (context, overlay, child) => overlay ? const SizedBox.shrink() : child!,
+                    child: navBar,
+                  ),
                 ),
               ],
             ),
@@ -246,14 +255,34 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
             ),
           ),
         ),
-        if (_doNavBarOverlay)
-          Positioned(
-            left: 0.0,
-            width: screenSize.width,
-            top: _currentNavBarTop,
-            height: _currentNavBarHeight,
+        // Positioned.fill rather than a Positioned whose top and height are
+        // rebuilt: the geometry now changes inside the builder, so a scroll
+        // repaints this one subtree instead of the whole page. Empty space
+        // inside the fill hit-tests through, so only the bar itself takes
+        // pointers, exactly as before.
+        Positioned.fill(
+          child: ValueListenableBuilder<bool>(
+            valueListenable: _doNavBarOverlay,
             child: navBar,
+            builder: (context, overlay, child) => !overlay
+                ? const SizedBox.shrink()
+                : AnimatedBuilder(
+                    animation: _navBarGeometry,
+                    child: child,
+                    builder: (context, bar) => Align(
+                      alignment: Alignment.topLeft,
+                      child: Transform.translate(
+                        offset: Offset(0, _navBarTop.value),
+                        child: SizedBox(
+                          width: screenSize.width,
+                          height: _navBarHeight.value,
+                          child: bar,
+                        ),
+                      ),
+                    ),
+                  ),
           ),
+        ),
       ],
     );
   }
@@ -261,8 +290,8 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
 
 class NavBar extends StatefulWidget {
   final double overlayRestHeight;
-  final bool isActive;
-  final double navbarFrac;
+  final ValueListenable<bool> isActive;
+  final ValueListenable<double> navbarFrac;
   final ScrollController controller;
   final GlobalKey viewsParentKey;
 
@@ -281,7 +310,7 @@ class _NavBarState extends AnimatedState<NavBar> with TickerProviderStateMixin {
 
   late final _activeColorController = AnimationController(vsync: this, duration: animationDurationActive)..autoDispose(this);
   late final _clickedColorController = AnimationController(vsync: this, duration: animationDurationClicked)..autoDispose(this);
-  late final Listenable _listenable = Listenable.merge([_activeColorController, _clickedColorController]);
+  late final Listenable _listenable = Listenable.merge([_activeColorController, _clickedColorController, widget.isActive, widget.navbarFrac]);
 
   final _inactiveColor = Colors.grey[400]!.withValues(alpha: 0.75);
   final _activeColor = accentColor;
@@ -381,8 +410,8 @@ class _NavBarState extends AnimatedState<NavBar> with TickerProviderStateMixin {
                 Color mainColor = getColor([i]);
                 Color leftColor = getColor([i, i - 1]);
                 Color rghtColor = getColor([i, i + 1]);
-                double widthT = widget.isActive ? 2 : 0;
-                double widthB = widget.isActive ? 2 : 0;
+                double widthT = widget.isActive.value ? 2 : 0;
+                double widthB = widget.isActive.value ? 2 : 0;
                 double widthL = (i == 0) ? 2 : 1;
                 double widthR = (i == views.length - 1) ? 2 : 1;
                 return Container(
@@ -441,12 +470,19 @@ class _NavBarState extends AnimatedState<NavBar> with TickerProviderStateMixin {
       child: FractionallySizedBox(
         alignment: Alignment.topCenter,
         widthFactor: 0.9, // match ViewHome
-        child: Container(
-          decoration: BoxDecoration(
-            color: Color.lerp(Colors.black.withValues(alpha: 0.5), Colors.black, widget.navbarFrac)!,
-          ),
+        // Only the backdrop colour depends on the scroll position, and the
+        // buttons ride through in the child slot, so a scroll repaints this
+        // one Container instead of rebuilding the bar.
+        child: AnimatedBuilder(
+          animation: _listenable,
           child: Row(
             children: buttons.map((button) => Expanded(child: button)).toList(),
+          ),
+          builder: (context, child) => Container(
+            decoration: BoxDecoration(
+              color: Color.lerp(Colors.black.withValues(alpha: 0.5), Colors.black, widget.navbarFrac.value)!,
+            ),
+            child: child,
           ),
         ),
       ),

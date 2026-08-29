@@ -7,3 +7,9 @@ bool bootSplashPresent() => false;
 void bootSplashFlyOut() {}
 
 void onBootSplashDone(void Function() callback) {}
+
+/// See boot_trace.dart.
+void reportViewMetrics(double dpr, double width, double height) {}
+
+/// See boot_trace.dart.
+void reportBuild(String build) {}

@@ -68,6 +68,20 @@
     var docOffset = Math.max(0, Math.round(performance.timeOrigin - firstOrigin));
     function r1(x) { return Math.round(x * 10) / 10; }
 
+    // Flutter's own view metrics. The viewport line above comes from the DOM,
+    // which reports CSS pixels; what the GPU shades is this size.
+    var flutterMetrics = null;
+    window.__flutterMetrics = function (dpr, w, h) {
+      flutterMetrics = 'dpr=' + (Math.round(dpr * 100) / 100) +
+                       '  canvas=' + Math.round(w) + 'x' + Math.round(h) +
+                       ' (' + (Math.round(w * h / 1e5) / 10) + ' Mpx)';
+    };
+
+    // Which build Dart actually resolved, so a stale deploy cannot be mistaken
+    // for a change that did nothing.
+    var buildState = null;
+    window.__buildState = function (build) { buildState = String(build); };
+
     window.__bootPhase = function (name) {
       name = String(name);
       phases.push([r1(performance.now()), name]);
@@ -121,11 +135,38 @@
     // Frame timings after hand-over say nothing while the page sits still:
     // Flutter is not rendering, so every tick is 16.7ms by default. Ask for
     // real input and measure what it costs.
+    // Two warm runs of the same build came back at 20 and 42 long frames,
+    // because how much and how fast a person scrolls is most of what the window
+    // measures. Drive the scrolling instead, so runs are comparable to each
+    // other rather than to whatever the hand did that time.
+    function autoScroll() {
+      var target = document.querySelector('flutter-view') ||
+                   document.querySelector('flt-glass-pane') || document.body;
+      var tick = 0;
+      var id = setInterval(function () {
+        if (done || interactFrom === null) { clearInterval(id); return; }
+        tick++;
+        var down = Math.floor(tick / 120) % 2 === 0; // ~2s each way
+        try {
+          target.dispatchEvent(new WheelEvent('wheel', {
+            deltaY: down ? 40 : -40,
+            deltaMode: 0,
+            bubbles: true,
+            cancelable: true,
+            clientX: Math.round(innerWidth / 2),
+            clientY: Math.round(innerHeight / 2)
+          }));
+        } catch (e) { clearInterval(id); }
+      }, 16);
+    }
+
     function interact() {
       if (done || interactFrom !== null) return;
       interactFrom = performance.now();
+      autoScroll();
       var tag = document.createElement('div');
-      tag.textContent = 'PROFILING: scroll and click around for ' + (INTERACT_MS / 1000) + 's -- the report follows';
+      tag.textContent = 'PROFILING: auto-scrolling for ' + (INTERACT_MS / 1000) +
+        's. Leave the mouse alone for a comparable run, or click a few times if you want input numbers.';
       tag.setAttribute('style', 'position:fixed;left:0;right:0;top:0;z-index:2147483646;pointer-events:none;' +
         'background:#00e8f3;color:#06110f;font:600 14px ui-monospace,Menlo,Consolas,monospace;padding:8px;text-align:center');
       document.body.appendChild(tag);
@@ -194,6 +235,13 @@
       var names = res.map(function (r) { return r[3]; }).join(' ');
       var app = /main\.dart\.wasm/.test(names) ? 'wasm' : (/main\.dart\.js/.test(names) ? 'dart2js FALLBACK' : '?');
       var eng = /skwasm/.test(names) ? 'skwasm' : (/canvaskit/.test(names) ? 'canvaskit' : '?');
+      out.push('flutter   : ' + (flutterMetrics || '(not reported)'));
+      if (buildState) {
+        out.push('build     : ' + buildState);
+      } else {
+        out.push('build     : NOT REPORTED   <-- Dart never called the hook. Stale build, or it');
+        out.push('            crashed before main().');
+      }
       out.push('renderer  : app=' + app + '  engine=' + eng +
                (app.indexOf('FALLBACK') >= 0 ? '   <-- NOT the wasm build; check the GPU line, no WebGL forces this' : ''));
       out.push('paint     : first=' + (paint['first-paint'] || '-') + 'ms  contentful=' + (paint['first-contentful-paint'] || '-') + 'ms');
@@ -208,13 +256,14 @@
         out.push('            Usually the renderer download: check the critical path below.');
       }
 
+      var swGap = null;
       var boot = null, engine = null;
       res.forEach(function (r) {
         if (/flutter_bootstrap\.js/.test(r[3])) boot = boot === null ? r[1] : Math.min(boot, r[1]);
         if (/canvaskit\.(js|wasm)|skwasm|main\.dart\.(wasm|js|mjs)/.test(r[3])) engine = engine === null ? r[0] : Math.min(engine, r[0]);
       });
       if (boot !== null && engine !== null) {
-        var gap = Math.round(engine - boot);
+        var gap = swGap = Math.round(engine - boot);
         out.push('sw stall  : ' + gap + 'ms between flutter_bootstrap.js and the renderer' + (gap > 300 ? '   <-- DEAD TIME' : ''));
       }
 
@@ -248,7 +297,8 @@
                    '  |  after boot ' + mb(totalBytes - preBytes) + ' / ' + (totalReqs - preReqs)) +
                (tailCapped ? '   <-- still downloading ' + (TAIL_CAP_MS / 1000) + 's after boot, so total is a floor' : ''));
       out.push('            ' + (swOwns
-        ? 'encoded body size; a service worker serves this page, so wire size reads 0 for everything'
+        ? 'UNCOMPRESSED: a service worker serves this page, so wire size reads 0 and the fallback is ' +
+          'the body it handed over, already decompressed. Roughly 2x what crossed the network.'
         : 'wire size where the browser reported one, encoded body size otherwise'));
 
       out.push('');
@@ -291,6 +341,19 @@
       out.push('');
       out.push('long animation frames >=50ms: ' + big.length +
                (big.length ? '  worst: ' + big.slice(0, 6).map(function (e) { return e[1] + 'ms(blocking ' + e[2] + ')'; }).join(', ') : ''));
+      // Split by window and by cause. A long frame that spent most of itself
+      // blocking is the main thread doing work -- compiling wasm, decoding,
+      // laying out. One that blocked for ~0 is the GPU. Those have nothing to
+      // do with each other, and a cold-cache boot piles up the first kind,
+      // which otherwise reads as a regression in the second.
+      var window_ = function (from, to) {
+        var sel = big.filter(function (e) { return e[0] >= from && (to === null || e[0] < to); });
+        var blocked = sel.filter(function (e) { return e[2] > e[1] / 2; }).length;
+        return sel.length + ' (' + blocked + ' main-thread bound, ' + (sel.length - blocked) + ' raster bound)';
+      };
+      var cut = booted !== null ? booted : 0;
+      out.push('  up to hand-over  : ' + window_(0, booted !== null ? cut : null));
+      if (booted !== null) out.push('  after hand-over  : ' + window_(cut, null));
 
       out.push('');
       out.push('critical path (ms from navigation start, size, origin):');
@@ -307,15 +370,20 @@
         var iv = [];
         for (var i = 1; i < during.length; i++) iv.push(during[i] - during[i - 1]);
         out.push('');
-        out.push('interaction window (' + Math.round(INTERACT_MS / 1000) + 's of scrolling and clicking after hand-over):');
-        out.push('  frames: ' + iv.length + '  p50 ' + (iv.length ? pct(iv, 50).toFixed(1) : '-') +
+        out.push('interaction window (' + Math.round(INTERACT_MS / 1000) +
+                 's of continuous driven scrolling after hand-over -- a stress test, heavier than real use):');
+        var ideal = Math.round(INTERACT_MS / 16.7);
+        out.push('  frame yield: ' + Math.round(100 * iv.length / ideal) + '% (' + iv.length + ' of ~' + ideal + ')');
+        out.push('  frames: ' + iv.length + ' of ~' + ideal + ' possible' +
+                 '  p50 ' + (iv.length ? pct(iv, 50).toFixed(1) : '-') +
                  'ms  p90 ' + (iv.length ? pct(iv, 90).toFixed(1) : '-') +
                  'ms  max ' + (iv.length ? Math.max.apply(null, iv).toFixed(1) : '-') +
                  'ms  over 16.7ms ' + iv.filter(function (x) { return x > 16.7; }).length + '/' + iv.length);
         var ev = events.filter(function (e) { return e[0] >= interactFrom; })
                        .sort(function (a, b) { return b[5] - a[5]; });
         if (!ev.length) {
-          out.push('  no input recorded -- if you did scroll and click, the Event Timing API is missing here');
+          out.push('  no input recorded, which is expected: the driven scroll is synthetic wheel events, ' +
+                   'and Event Timing only reports discrete input. Click a few times to populate this.');
         } else {
           out.push('  slowest inputs (total = waiting + handler + presenting):');
           out.push('  ' + pad('event', 16) + pad('total', 9, true) + pad('waiting', 9, true) +
@@ -325,15 +393,38 @@
                      pad(e[3] + 'ms', 9, true) + pad(e[4] + 'ms', 12, true));
           });
           var worst = ev[0];
-          var blame = worst[2] >= worst[3] && worst[2] >= worst[4] ? 'waiting for a busy main thread'
-                    : worst[3] >= worst[4] ? 'the Dart handler itself'
-                    : 'presenting the frame (raster / GPU)';
-          out.push('  worst input spent most of its time: ' + blame);
+          // Below ~50ms nothing is wrong and the split is noise; saying a 16ms
+          // event was "raster bound" reads as a finding when it is not one.
+          if (worst[5] >= 50) {
+            var blame = worst[2] >= worst[3] && worst[2] >= worst[4] ? 'waiting for a busy main thread'
+                      : worst[3] >= worst[4] ? 'the Dart handler itself'
+                      : 'presenting the frame (raster / GPU)';
+            out.push('  worst input spent most of its time: ' + blame);
+          } else {
+            out.push('  no input cost more than 50ms; nothing to attribute');
+          }
         }
       }
 
       var warn = logs.filter(function (l) { return /prepareServiceWorker|CPU-only|webGLVersion|Reloading page|COEP|COOP/.test(l); });
       if (warn.length) { out.push(''); out.push('notable console output:'); warn.slice(0, 8).forEach(function (l) { out.push('  ' + l); }); }
+      // A run under conditions unlike the others is not comparable to them, and
+      // the difference is easy to miss in a wall of numbers. Say it outright.
+      var bad = [];
+      if (navs > 1) bad.push(navs + ' document loads (a reload chain, not a fresh navigation)');
+      if (docOffset > 1000) bad.push(Math.round(docOffset / 1000) + 's elapsed before this document existed');
+      if (swGap !== null && swGap > 300) bad.push(swGap + 'ms service worker stall');
+      if (!buildState) bad.push('build never reported');
+      out.push('');
+      if (bad.length) {
+        out.push('run       : SUSPECT -- ' + bad.join('; ') + '.');
+        out.push('            Not comparable to a clean run. Reload and take it again.');
+      } else {
+        out.push('run       : clean (single fresh navigation, no stall, build reported)');
+      }
+      out.push('            A/B pairs need A,B,A,B,A interleaved and the median reported:');
+      out.push('            repeat baselines on this machine have spanned 58-69% yield,');
+      out.push('            so a single pair cannot resolve anything under ~10 points.');
       out.push('#### END');
       return out.join('\n');
     }

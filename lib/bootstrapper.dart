@@ -53,7 +53,11 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
   late final AnimationController _fadeInChildController = AnimationController(vsync: this)..autoDispose(this);
   late final AnimationController _clickTextFadeController = AnimationController(vsync: this)..autoDispose(this);
 
-  // RepaintBoundary: without it, the fade-in overlay repaints the entire home page every frame.
+  // RepaintBoundary: without it, the fade-in overlay repaints the entire home
+  // page every frame. It earns that during the fade; afterwards it means every
+  // frame is drawn into an offscreen texture and blitted, which is the viewport
+  // paid for twice. Dropping it after boot measured worse anyway: 66% of 60fps
+  // against 69% with it kept.
   late final Widget? _child = switch (widget.child?.call()) {
     null => null,
     final child => RepaintBoundary(child: child),
@@ -297,6 +301,10 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _setFlag('firstFrameDone', () => _firstFrameDone = true);
+      if (mounted) {
+        final view = View.of(context);
+        reportViewMetrics(view.devicePixelRatio, view.physicalSize.width, view.physicalSize.height);
+      }
       widget.precache?.call(context).whenComplete(() {
         _setFlag('childReady', () => _childReady = true);
       });
@@ -459,10 +467,14 @@ class _BootstrapperState extends AnimatedState<Bootstrapper> with TickerProvider
       case BootState.BOOTED:
         stack = [?childLayer];
     }
-    // scaffold for providing text theme data.
+    // Scaffold for providing text theme data, and for nothing else: it is the
+    // outermost one, so its background is covered during boot by [backdrop] and
+    // after hand-over by the page's own black Scaffold. Left opaque it filled
+    // the viewport every frame for no one.
     // Always a Stack, even for a single layer, so the tree shape (and therefore
     // the child's element and layout) survives every boot state transition.
     return Scaffold(
+      backgroundColor: Colors.transparent,
       body: Stack(children: stack),
     );
   }

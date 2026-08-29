@@ -10,6 +10,8 @@ import 'package:portfolio/widgets/parallax_scroller.dart';
 import 'package:portfolio/widgets/my_view.dart';
 import 'package:portfolio/views/view_certifications.dart';
 import 'package:portfolio/views/view_home.dart';
+import 'package:portfolio/util/boot_trace.dart';
+import 'package:portfolio/util/build_id.dart';
 import 'package:portfolio/util/miscellaneous.dart';
 import 'package:portfolio/views/view_projects.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -37,6 +39,9 @@ final accentColor = Color(0xFF00E8F3); // Color.lerp(Color(0xFF00FFEE), Color(0x
 const String background_path = "assets/background.webp";
 
 void main() {
+  // Before anything else, so a report from a stale deploy is loud rather than
+  // silently indistinguishable from a report on the change under test.
+  reportBuild(buildId);
   assert(views.isNotEmpty);
   const String title = "Reuben's Portfolio";
   final loadKey = GlobalKey();
@@ -67,7 +72,8 @@ void main() {
         },
         child: () => Scaffold(
           key: loadKey, // to prevent re-initializing state immediately after fade-in by bootstrapper
-          backgroundColor: Colors.black, // shows through until background.webp arrives
+          // Black until background.webp arrives.
+          backgroundColor: Colors.black,
           // appBar: AppBar(
           //   backgroundColor: accentColor,
           // ),
@@ -81,6 +87,21 @@ void main() {
 class _ViewController extends StatefulWidget {
   @override
   State<_ViewController> createState() => _ViewControllerState();
+}
+
+Widget _backdrop() {
+  // FilterQuality.low is bilinear, which runs in the texture unit and is the
+  // floor for drawing an image. Cubic cost sixteen samples per pixel across the
+  // whole viewport every frame; nearest measured indistinguishable from this.
+  return RepaintBoundary(
+    child: LazyImage(
+      image: const NetworkImage(background_path),
+      fit: BoxFit.fill,
+      filterQuality: FilterQuality.low,
+      fadeDuration: const Duration(milliseconds: 600),
+      placeholder: const ColoredBox(color: Colors.black),
+    ),
+  );
 }
 
 class _ViewControllerState extends AnimatedState<_ViewController> with SingleTickerProviderStateMixin {
@@ -218,18 +239,13 @@ class _ViewControllerState extends AnimatedState<_ViewController> with SingleTic
                     // RepaintBoundary gives the backdrop its own layer so the
                     // boot fade-in re-composites it instead of pulling it into
                     // a full-screen repaint of the page.
-                    // NOTE: filterQuality is left at high deliberately. Dropping
-                    // it to medium only bought ~10% of the fade's frame time in
-                    // measurement, which does not justify a visual change.
-                    background: RepaintBoundary(
-                      child: LazyImage(
-                        image: NetworkImage(background_path),
-                        fit: BoxFit.fill,
-                        filterQuality: FilterQuality.high,
-                        fadeDuration: const Duration(milliseconds: 600),
-                        placeholder: const ColoredBox(color: Colors.black),
-                      ),
-                    ),
+                    // filterQuality is low, not high. High is cubic: sixteen
+                    // texture samples per pixel across a 3774x2041 viewport,
+                    // every frame, and it was the dominant cost in every
+                    // measurement -- 53 frames over 50ms against 11 without it.
+                    // Note that medium would buy nothing here: its mipmaps only
+                    // help when minifying, and this backdrop is upscaled.
+                    background: _backdrop(),
                     child: SizedBox(
                       width: screenSize.width,
                       child: Column(

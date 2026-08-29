@@ -1,10 +1,14 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 class MyCard extends StatelessWidget {
   final Widget child;
   const MyCard({super.key, required this.child});
+
+  // No BackdropFilter. It snapshots everything painted behind it, blurs it in
+  // two passes and composites the result, every frame, and it does that whether
+  // the backdrop is a photograph or a flat colour. On an Intel UHD at 3774x2041
+  // it cost 136 long frames against 17 without it, which was more than the
+  // whole rest of the page combined.
 
   @override
   Widget build(BuildContext context) {
@@ -34,17 +38,14 @@ class MyCard extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), // TODO fix no-blur at end of scrollview on mobile web
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.25),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: child,
-            ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.25),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: child,
           ),
         ),
       ),

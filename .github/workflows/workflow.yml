@@ -31,7 +31,11 @@ jobs:
         # service worker can never install. Shipping it anyway made flutter.js wait
         # out its full 4s timeout before downloading the renderer, and blocked
         # cross-origin isolation from ever being established.
-        run: flutter build web --release --wasm --pwa-strategy=none
+        # BUILD_ID is stamped into the profile report so a stale deploy is
+        # distinguishable from a change that did nothing.
+        run: |
+          flutter build web --release --wasm --pwa-strategy=none \
+            --dart-define=BUILD_ID="$(git rev-parse --short HEAD) committed $(git log -1 --format=%cI) built $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
       - name: Copy CNAME
         run: cp CNAME build/web/

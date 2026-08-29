@@ -143,7 +143,7 @@ class ViewHome extends StatelessView {
                         shape: BoxShape.circle,
                         border: BoxBorder.all(color: accentColor, width: 4),
                       ),
-                      child: Image.network('assets/profile_pic.webp', width: ppCircleDiameter - 8, height: ppCircleDiameter - 8), // 4px outline to match rest of dividers
+                      child: Image.network('assets/profile_pic.webp', width: ppCircleDiameter - 8, height: ppCircleDiameter - 8, fit: BoxFit.cover), // 4px outline to match rest of dividers
                     ),
                     SizedBox(width: 0.02 * contentSize.width, height: 0.01 * contentSize.height),
                     Expanded(

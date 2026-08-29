@@ -1,0 +1,781 @@
+<!DOCTYPE html><html><head>
+  <!--
+    One-time cleanup for visitors carrying the old Flutter service worker.
+
+    This site used to ship both coi-serviceworker.js and Flutter's own
+    flutter_service_worker.js, both claiming scope '/'. Only one can control the
+    page. Anyone who visited before that was fixed still has the Flutter worker
+    installed, and it is cache-first, so they keep being served the OLD build:
+    the old bootstrap (which stalls 4s waiting on its own worker), no
+    cross-origin isolation, and therefore the dart2js fallback instead of wasm.
+    It does not heal on its own, because the stale worker answers the requests
+    that would have replaced it.
+
+    So: unregister it, drop its caches, reload once. No-op for everyone else.
+  -->
+  <script>
+  (function () {
+    if (!('serviceWorker' in navigator) || !navigator.serviceWorker.getRegistrations) return;
+    var FLAG = 'staleSwCleaned';
+    if (sessionStorage.getItem(FLAG)) return;
+    navigator.serviceWorker.getRegistrations().then(function (regs) {
+      // Check every slot, not just the first non-null one: the stale worker can
+      // sit in `waiting` while coi-serviceworker holds `active`, and vice versa.
+      var stale = regs.filter(function (reg) {
+        return [reg.active, reg.waiting, reg.installing].some(function (w) {
+          return w && w.scriptURL && w.scriptURL.indexOf('flutter_service_worker.js') !== -1;
+        });
+      });
+      if (!stale.length) return;
+      console.log('Removing a stale Flutter service worker and reloading once.');
+      sessionStorage.setItem(FLAG, '1');
+      return Promise.all(stale.map(function (reg) { return reg.unregister(); }))
+        .then(function () { return window.caches ? caches.keys() : []; })
+        .then(function (keys) {
+          return Promise.all(keys.filter(function (k) { return /flutter/i.test(k); })
+                                 .map(function (k) { return caches.delete(k); }));
+        })
+        .then(function () { location.reload(); });
+    }).catch(function () { /* never block a boot on cleanup */ });
+  })();
+  </script>
+  <!--
+    Boot profiler. Inert unless the page is opened with ?profile, in which case
+    it records the boot and prints a pasteable report over the page. It sits
+    before coi-serviceworker.js so it can see that script's reloads and logs.
+    Measuring boot against localhost is not the same measurement as measuring it
+    against the real host over a real network, so this ships in production.
+  -->
+  <script>
+  (function () {
+    if (!/(^|[?&])profile\b/.test(location.search)) return;
+    var t0 = performance.now(), frames = [], loaf = [], phases = [], logs = [], events = [], done = false, tailCapped = false;
+    var INTERACT_MS = 12000, interactFrom = null;
+    var CAP_MS = 120000;
+    var NAV = 'bootprofile:navs';
+    var navs = (parseInt(sessionStorage.getItem(NAV) || '0', 10) || 0) + 1;
+    try { sessionStorage.setItem(NAV, String(navs)); } catch (e) {}
+    // Every number below is relative to THIS document, but coi-serviceworker
+    // reloads once, so the first document's time was invisible in the report
+    // while being very much visible to the person waiting. Carry the first
+    // navigation's origin across the reload and report the offset.
+    var OKEY = 'bootprofile:origin';
+    var firstOrigin = parseFloat(sessionStorage.getItem(OKEY) || '0') || 0;
+    if (!firstOrigin) {
+      firstOrigin = performance.timeOrigin;
+      try { sessionStorage.setItem(OKEY, String(firstOrigin)); } catch (e) {}
+    }
+    var docOffset = Math.max(0, Math.round(performance.timeOrigin - firstOrigin));
+    function r1(x) { return Math.round(x * 10) / 10; }
+
+    // Flutter's own view metrics. The viewport line above comes from the DOM,
+    // which reports CSS pixels; what the GPU shades is this size.
+    var flutterMetrics = null;
+    window.__flutterMetrics = function (dpr, w, h) {
+      flutterMetrics = 'dpr=' + (Math.round(dpr * 100) / 100) +
+                       '  canvas=' + Math.round(w) + 'x' + Math.round(h) +
+                       ' (' + (Math.round(w * h / 1e5) / 10) + ' Mpx)';
+    };
+
+    // Which build Dart actually resolved, so a stale deploy cannot be mistaken
+    // for a change that did nothing.
+    var buildState = null;
+    window.__buildState = function (build) { buildState = String(build); };
+
+    window.__bootPhase = function (name) {
+      name = String(name);
+      phases.push([r1(performance.now()), name]);
+      if (name === 'BOOTED') waitForQuiet();
+    };
+
+
+    // A resource entry only exists once its request has finished, so a single
+    // large download in flight is indistinguishable from an idle network.
+    // Count requests directly instead.
+    var inflight = 0;
+    try {
+      var _fetch = window.fetch;
+      if (_fetch) window.fetch = function () {
+        inflight++;
+        var dec = function () { inflight--; };
+        var p;
+        try { p = _fetch.apply(this, arguments); } catch (e) { dec(); throw e; }
+        return p.then(function (r) { dec(); return r; }, function (e) { dec(); throw e; });
+      };
+    } catch (e) {}
+    try {
+      var _send = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.send = function () {
+        var self = this;
+        inflight++;
+        var dec = function () { if (!self.__bpCounted) { self.__bpCounted = true; inflight--; } };
+        try { self.addEventListener('loadend', dec); } catch (e) {}
+        try { return _send.apply(this, arguments); } catch (e) { dec(); throw e; }
+      };
+    } catch (e) {}
+
+    // The interesting assets (backdrop, thumbnails) start downloading at mount
+    // and are still in flight when the boot screen leaves, so a report fired
+    // 800ms after handover counts neither their bytes nor the frames they cost.
+    // Wait for the network to go quiet instead.
+    var QUIET_MS = 2500, TAIL_CAP_MS = 30000;
+    function waitForQuiet() {
+      var bootedAt = performance.now(), seen = -1, lastChange = bootedAt;
+      (function poll() {
+        if (done) return;
+        var n = 0, now = performance.now();
+        try { n = performance.getEntriesByType('resource').length; } catch (e) {}
+        if (n !== seen) { seen = n; lastChange = now; }
+        if (inflight === 0 && now - lastChange >= QUIET_MS) return interact();
+        if (now - bootedAt >= TAIL_CAP_MS) { tailCapped = true; return interact(); }
+        setTimeout(poll, 250);
+      })();
+    }
+
+    // Frame timings after hand-over say nothing while the page sits still:
+    // Flutter is not rendering, so every tick is 16.7ms by default. Ask for
+    // real input and measure what it costs.
+    // Two warm runs of the same build came back at 20 and 42 long frames,
+    // because how much and how fast a person scrolls is most of what the window
+    // measures. Drive the scrolling instead, so runs are comparable to each
+    // other rather than to whatever the hand did that time.
+    function autoScroll() {
+      var target = document.querySelector('flutter-view') ||
+                   document.querySelector('flt-glass-pane') || document.body;
+      var tick = 0;
+      var id = setInterval(function () {
+        if (done || interactFrom === null) { clearInterval(id); return; }
+        tick++;
+        var down = Math.floor(tick / 120) % 2 === 0; // ~2s each way
+        try {
+          target.dispatchEvent(new WheelEvent('wheel', {
+            deltaY: down ? 40 : -40,
+            deltaMode: 0,
+            bubbles: true,
+            cancelable: true,
+            clientX: Math.round(innerWidth / 2),
+            clientY: Math.round(innerHeight / 2)
+          }));
+        } catch (e) { clearInterval(id); }
+      }, 16);
+    }
+
+    function interact() {
+      if (done || interactFrom !== null) return;
+      interactFrom = performance.now();
+      autoScroll();
+      var tag = document.createElement('div');
+      tag.textContent = 'PROFILING: auto-scrolling for ' + (INTERACT_MS / 1000) +
+        's. Leave the mouse alone for a comparable run, or click a few times if you want input numbers.';
+      tag.setAttribute('style', 'position:fixed;left:0;right:0;top:0;z-index:2147483646;pointer-events:none;' +
+        'background:#00e8f3;color:#06110f;font:600 14px ui-monospace,Menlo,Consolas,monospace;padding:8px;text-align:center');
+      document.body.appendChild(tag);
+      setTimeout(function () { try { tag.remove(); } catch (e) {} finish(); }, INTERACT_MS);
+    }
+    (function tick(ts) { frames.push(ts); if (!done) requestAnimationFrame(tick); })(performance.now());
+
+    ['log', 'warn', 'error'].forEach(function (lvl) {
+      var orig = console[lvl];
+      console[lvl] = function () {
+        try { if (logs.length < 40) logs.push(lvl + ': ' + Array.prototype.map.call(arguments, String).join(' ').slice(0, 180)); } catch (e) {}
+        return orig.apply(console, arguments);
+      };
+    });
+    try {
+      new PerformanceObserver(function (l) {
+        l.getEntries().forEach(function (e) { loaf.push([r1(e.startTime), r1(e.duration), r1(e.blockingDuration || 0)]); });
+      }).observe({ type: 'long-animation-frame', buffered: true });
+    } catch (e) {}
+
+    // Event Timing. A slow click has three quite different possible causes and
+    // this is the only thing that tells them apart: the main thread was already
+    // busy when the input arrived (input delay), the handler itself was slow
+    // (processing), or the frame showing the result took forever to reach the
+    // screen (presentation).
+    try {
+      new PerformanceObserver(function (l) {
+        l.getEntries().forEach(function (e) {
+          if (events.length > 200) return;
+          events.push([r1(e.startTime), e.name, r1(e.processingStart - e.startTime),
+                       r1(e.processingEnd - e.processingStart),
+                       r1(e.startTime + e.duration - e.processingEnd), r1(e.duration)]);
+        });
+      }).observe({ type: 'event', buffered: true, durationThreshold: 16 });
+    } catch (e) {}
+
+    function pct(a, p) { if (!a.length) return 0; var s = a.slice().sort(function (x, y) { return x - y; }); return s[Math.min(s.length - 1, Math.round(p / 100 * (s.length - 1)))]; }
+    function pad(s, n, right) { s = String(s); while (s.length < n) s = right ? ' ' + s : s + ' '; return s; }
+
+    function gpu() {
+      try {
+        var c = document.createElement('canvas'), g2 = c.getContext('webgl2'), g = g2 || c.getContext('webgl');
+        if (!g) return 'NONE (software rendering, frame times are not meaningful)';
+        var d = g.getExtension('WEBGL_debug_renderer_info');
+        var s = (d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER)) + (g2 ? ' [webgl2]' : ' [webgl1]');
+        var lose = g.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext();
+        return s;
+      } catch (e) { return 'unknown: ' + e; }
+    }
+
+    function build() {
+      var out = [], res = [], paint = {};
+      try { performance.getEntriesByType('paint').forEach(function (e) { paint[e.name] = r1(e.startTime); }); } catch (e) {}
+      try { performance.getEntriesByType('resource').forEach(function (e) { res.push([r1(e.startTime), r1(e.responseEnd), e.transferSize || 0, e.name, e.encodedBodySize || 0]); }); } catch (e) {}
+      res.sort(function (a, b) { return a[0] - b[0]; });
+
+      out.push('#### BOOT PROFILE (in-app) ' + new Date().toISOString());
+      out.push('url       : ' + location.href);
+      out.push('device    : ' + navigator.userAgent);
+      out.push('viewport  : ' + innerWidth + 'x' + innerHeight + ' dpr=' + devicePixelRatio +
+               ' cores=' + (navigator.hardwareConcurrency || '?') + ' mem=' + (navigator.deviceMemory || '?'));
+      out.push('GPU       : ' + gpu());
+      out.push('isolated  : crossOriginIsolated=' + !!self.crossOriginIsolated + '  document loads=' + navs);
+      out.push('loads     : this document began ' + docOffset + 'ms after the first navigation' +
+               (docOffset > 1000 ? '   <-- that much was spent before this document existed' : ''));
+      var names = res.map(function (r) { return r[3]; }).join(' ');
+      var app = /main\.dart\.wasm/.test(names) ? 'wasm' : (/main\.dart\.js/.test(names) ? 'dart2js FALLBACK' : '?');
+      var eng = /skwasm/.test(names) ? 'skwasm' : (/canvaskit/.test(names) ? 'canvaskit' : '?');
+      out.push('flutter   : ' + (flutterMetrics || '(not reported)'));
+      if (buildState) {
+        out.push('build     : ' + buildState);
+      } else {
+        out.push('build     : NOT REPORTED   <-- Dart never called the hook. Stale build, or it');
+        out.push('            crashed before main().');
+      }
+      out.push('renderer  : app=' + app + '  engine=' + eng +
+               (app.indexOf('FALLBACK') >= 0 ? '   <-- NOT the wasm build; check the GPU line, no WebGL forces this' : ''));
+      out.push('paint     : first=' + (paint['first-paint'] || '-') + 'ms  contentful=' + (paint['first-contentful-paint'] || '-') + 'ms');
+
+      var booted = null;
+      for (var i = 0; i < phases.length; i++) if (phases[i][1] === 'BOOTED') booted = phases[i][0];
+      out.push('handover  : ' + (booted !== null ? Math.round(booted) + 'ms' : 'NOT REACHED') +
+               (booted !== null && docOffset ? '  (' + Math.round(booted + docOffset) + 'ms from the first navigation)' : '') +
+               '   frames=' + frames.length);
+      if (booted === null) {
+        out.push('            report fired on the ' + (CAP_MS / 1000) + 's cap, so the boot never finished.');
+        out.push('            Usually the renderer download: check the critical path below.');
+      }
+
+      var swGap = null;
+      var boot = null, engine = null;
+      res.forEach(function (r) {
+        if (/flutter_bootstrap\.js/.test(r[3])) boot = boot === null ? r[1] : Math.min(boot, r[1]);
+        if (/canvaskit\.(js|wasm)|skwasm|main\.dart\.(wasm|js|mjs)/.test(r[3])) engine = engine === null ? r[0] : Math.min(engine, r[0]);
+      });
+      if (boot !== null && engine !== null) {
+        var gap = swGap = Math.round(engine - boot);
+        out.push('sw stall  : ' + gap + 'ms between flutter_bootstrap.js and the renderer' + (gap > 300 ? '   <-- DEAD TIME' : ''));
+      }
+
+      // transferSize reads 0 both for a cache hit AND for anything a service
+      // worker served, and coi-serviceworker proxies every request on this
+      // page, so reporting wire bytes reported almost nothing. Fall back to the
+      // encoded body size, which is what the app received either way, and say
+      // which of the two is on screen.
+      var swOwns = false;
+      try { swOwns = !!(navigator.serviceWorker && navigator.serviceWorker.controller); } catch (e) {}
+      var sizeOf = function (r) { return r[2] > 0 ? r[2] : r[4]; };
+      var navBytes = 0;
+      try { var nv = performance.getEntriesByType('navigation')[0]; if (nv) navBytes = nv.transferSize || nv.encodedBodySize || 0; } catch (e) {}
+      var totalBytes = navBytes, totalReqs = 1, preBytes = navBytes, preReqs = 1;
+      var seenUrl = {}, uniqueBytes = navBytes;
+      res.forEach(function (r) {
+        var n = sizeOf(r);
+        totalBytes += n; totalReqs++;
+        if (!seenUrl[r[3]]) { seenUrl[r[3]] = 1; uniqueBytes += n; }
+        if (booted !== null && r[1] <= booted) { preBytes += n; preReqs++; }
+      });
+      var mb = function (n) {
+        return n >= 1048576 ? (n / 1048576).toFixed(2) + 'MB' : n >= 1024 ? Math.round(n / 1024) + 'K' : n + 'B';
+      };
+      out.push('bytes     : total ' + mb(totalBytes) + ' / ' + totalReqs + ' requests' +
+               (uniqueBytes !== totalBytes ? ' (' + mb(uniqueBytes) + ' unique)' : '') +
+               (booted === null
+                 ? '  |  pre-boot n/a (boot never finished)'
+                 : '  |  pre-boot ' + mb(preBytes) + ' / ' + preReqs + ' (' +
+                   Math.round(100 * preBytes / (totalBytes || 1)) + '%)' +
+                   '  |  after boot ' + mb(totalBytes - preBytes) + ' / ' + (totalReqs - preReqs)) +
+               (tailCapped ? '   <-- still downloading ' + (TAIL_CAP_MS / 1000) + 's after boot, so total is a floor' : ''));
+      out.push('            ' + (swOwns
+        ? 'UNCOMPRESSED: a service worker serves this page, so wire size reads 0 and the fallback is ' +
+          'the body it handed over, already decompressed. Roughly 2x what crossed the network.'
+        : 'wire size where the browser reported one, encoded body size otherwise'));
+
+      out.push('');
+      out.push('phase                  span     n     p50     p90      max   over 16.7ms');
+      var end = frames.length ? frames[frames.length - 1] : 0;
+      // Gate flags share the phase channel but are events, not spans. Mixing
+      // them in would chop each real phase into fragments.
+      var isFlag = function (n) { return /^(flag:|WATCHDOG)/.test(n); };
+      var real = phases.filter(function (p) { return !isFlag(p[1]); });
+      var flags = phases.filter(function (p) { return isFlag(p[1]); });
+      var wins = [];
+      if (frames.length && real.length && frames[0] < real[0][0]) wins.push(['(before FLY_IN)', frames[0], real[0][0]]);
+      real.forEach(function (p, i) { wins.push([p[1] === 'BOOTED' ? 'BOOTED (post-boot tail)' : p[1], p[0], i + 1 < real.length ? real[i + 1][0] : end]); });
+      if (!real.length) out.push('  (no phase marks: this build predates the boot_trace hook)');
+      var worst = [0, '?'];
+      wins.forEach(function (w) {
+        var sel = frames.filter(function (f) { return f >= w[1] && f < w[2]; });
+        var iv = [];
+        for (var i = 1; i < sel.length; i++) { var d = sel[i] - sel[i - 1]; iv.push(d); if (d > worst[0]) worst = [d, w[0]]; }
+        if (!sel.length) return;
+        var cells = iv.length
+          ? [pct(iv, 50).toFixed(1), pct(iv, 90).toFixed(1), Math.max.apply(null, iv).toFixed(1),
+             iv.filter(function (x) { return x > 16.7; }).length + '/' + iv.length]
+          : ['-', '-', '-', 'too short to sample'];
+        out.push('  ' + pad(w[0], 20) + pad(Math.round(w[2] - w[1]) + 'ms', 8, true) +
+                 pad(iv.length, 6, true) + pad(cells[0], 8, true) +
+                 pad(cells[1], 8, true) + pad(cells[2], 9, true) + pad(cells[3], 22, true));
+      });
+      out.push('  worst single frame: ' + worst[0].toFixed(1) + 'ms, during ' + worst[1]);
+      out.push('');
+      out.push('boot gates (when each one opened):');
+      if (!flags.length) out.push('  none reported');
+      flags.forEach(function (f) { out.push('  ' + pad(Math.round(f[0]) + 'ms', 9, true) + '  ' + f[1]); });
+      var stuck = ['firstFrameDone', 'fontsReady', 'childReady', 'mountChild', 'childLaidOut'].filter(function (g) {
+        return !flags.some(function (f) { return f[1].indexOf(g) !== -1; });
+      });
+      if (stuck.length) out.push('  NEVER OPENED: ' + stuck.join(', ') + '   <-- this is what the boot was waiting on');
+
+      var big = loaf.filter(function (e) { return e[1] >= 50; }).sort(function (a, b) { return b[1] - a[1]; });
+      out.push('');
+      out.push('long animation frames >=50ms: ' + big.length +
+               (big.length ? '  worst: ' + big.slice(0, 6).map(function (e) { return e[1] + 'ms(blocking ' + e[2] + ')'; }).join(', ') : ''));
+      // Split by window and by cause. A long frame that spent most of itself
+      // blocking is the main thread doing work -- compiling wasm, decoding,
+      // laying out. One that blocked for ~0 is the GPU. Those have nothing to
+      // do with each other, and a cold-cache boot piles up the first kind,
+      // which otherwise reads as a regression in the second.
+      var window_ = function (from, to) {
+        var sel = big.filter(function (e) { return e[0] >= from && (to === null || e[0] < to); });
+        var blocked = sel.filter(function (e) { return e[2] > e[1] / 2; }).length;
+        return sel.length + ' (' + blocked + ' main-thread bound, ' + (sel.length - blocked) + ' raster bound)';
+      };
+      var cut = booted !== null ? booted : 0;
+      out.push('  up to hand-over  : ' + window_(0, booted !== null ? cut : null));
+      if (booted !== null) out.push('  after hand-over  : ' + window_(cut, null));
+
+      out.push('');
+      out.push('critical path (ms from navigation start, size, origin):');
+      res.filter(function (r) { return /canvaskit|skwasm|main\.dart|\.ttf|\.otf|\.woff|\.webp|Manifest/.test(r[3]); })
+         .slice(0, 30).forEach(function (r) {
+        var origin = '-'; try { origin = new URL(r[3]).host; } catch (e) {}
+        out.push('  ' + pad(Math.round(r[0]), 7, true) + ' ->' + pad(Math.round(r[1]), 7, true) +
+                 pad(sizeOf(r) ? Math.round(sizeOf(r) / 1024) + 'K' : '-', 8, true) + '  ' + pad(origin, 22) + ' ' +
+                 decodeURIComponent(r[3].split('/').pop()).slice(0, 42));
+      });
+
+      if (interactFrom !== null) {
+        var during = frames.filter(function (f) { return f >= interactFrom; });
+        var iv = [];
+        for (var i = 1; i < during.length; i++) iv.push(during[i] - during[i - 1]);
+        out.push('');
+        out.push('interaction window (' + Math.round(INTERACT_MS / 1000) +
+                 's of continuous driven scrolling after hand-over -- a stress test, heavier than real use):');
+        var ideal = Math.round(INTERACT_MS / 16.7);
+        out.push('  frame yield: ' + Math.round(100 * iv.length / ideal) + '% (' + iv.length + ' of ~' + ideal + ')');
+        out.push('  frames: ' + iv.length + ' of ~' + ideal + ' possible' +
+                 '  p50 ' + (iv.length ? pct(iv, 50).toFixed(1) : '-') +
+                 'ms  p90 ' + (iv.length ? pct(iv, 90).toFixed(1) : '-') +
+                 'ms  max ' + (iv.length ? Math.max.apply(null, iv).toFixed(1) : '-') +
+                 'ms  over 16.7ms ' + iv.filter(function (x) { return x > 16.7; }).length + '/' + iv.length);
+        var ev = events.filter(function (e) { return e[0] >= interactFrom; })
+                       .sort(function (a, b) { return b[5] - a[5]; });
+        if (!ev.length) {
+          out.push('  no input recorded, which is expected: the driven scroll is synthetic wheel events, ' +
+                   'and Event Timing only reports discrete input. Click a few times to populate this.');
+        } else {
+          out.push('  slowest inputs (total = waiting + handler + presenting):');
+          out.push('  ' + pad('event', 16) + pad('total', 9, true) + pad('waiting', 9, true) +
+                   pad('handler', 9, true) + pad('presenting', 12, true));
+          ev.slice(0, 10).forEach(function (e) {
+            out.push('  ' + pad(e[1], 16) + pad(e[5] + 'ms', 9, true) + pad(e[2] + 'ms', 9, true) +
+                     pad(e[3] + 'ms', 9, true) + pad(e[4] + 'ms', 12, true));
+          });
+          var worst = ev[0];
+          // Below ~50ms nothing is wrong and the split is noise; saying a 16ms
+          // event was "raster bound" reads as a finding when it is not one.
+          if (worst[5] >= 50) {
+            var blame = worst[2] >= worst[3] && worst[2] >= worst[4] ? 'waiting for a busy main thread'
+                      : worst[3] >= worst[4] ? 'the Dart handler itself'
+                      : 'presenting the frame (raster / GPU)';
+            out.push('  worst input spent most of its time: ' + blame);
+          } else {
+            out.push('  no input cost more than 50ms; nothing to attribute');
+          }
+        }
+      }
+
+      var warn = logs.filter(function (l) { return /prepareServiceWorker|CPU-only|webGLVersion|Reloading page|COEP|COOP/.test(l); });
+      if (warn.length) { out.push(''); out.push('notable console output:'); warn.slice(0, 8).forEach(function (l) { out.push('  ' + l); }); }
+      // A run under conditions unlike the others is not comparable to them, and
+      // the difference is easy to miss in a wall of numbers. Say it outright.
+      var bad = [];
+      if (navs > 1) bad.push(navs + ' document loads (a reload chain, not a fresh navigation)');
+      if (docOffset > 1000) bad.push(Math.round(docOffset / 1000) + 's elapsed before this document existed');
+      if (swGap !== null && swGap > 300) bad.push(swGap + 'ms service worker stall');
+      if (!buildState) bad.push('build never reported');
+      out.push('');
+      if (bad.length) {
+        out.push('run       : SUSPECT -- ' + bad.join('; ') + '.');
+        out.push('            Not comparable to a clean run. Reload and take it again.');
+      } else {
+        out.push('run       : clean (single fresh navigation, no stall, build reported)');
+      }
+      out.push('            A/B pairs need A,B,A,B,A interleaved and the median reported:');
+      out.push('            repeat baselines on this machine have spanned 58-69% yield,');
+      out.push('            so a single pair cannot resolve anything under ~10 points.');
+      out.push('#### END');
+      return out.join('\n');
+    }
+
+    function finish() {
+      if (done) return;
+      done = true;
+      var text;
+      try { text = build(); } catch (e) { text = 'profiler failed: ' + e + '\n' + e.stack; }
+      console.log(text);
+      var box = document.createElement('div');
+      box.setAttribute('style', 'position:fixed;inset:0;z-index:2147483647;background:#06110f;color:#d8fff2;padding:12px;overflow:auto;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace');
+      var btn = document.createElement('button');
+      btn.textContent = 'Copy report';
+      btn.setAttribute('style', 'position:sticky;top:0;margin-bottom:10px;padding:10px 16px;font:600 14px ui-monospace,Menlo,monospace;background:#00e8f3;color:#06110f;border:0;border-radius:4px;cursor:pointer');
+      var pre = document.createElement('textarea');
+      pre.value = text;
+      pre.setAttribute('readonly', 'readonly');
+      pre.setAttribute('style', 'width:100%;height:78vh;background:transparent;color:inherit;border:1px solid #1e4b47;font:inherit;white-space:pre;padding:8px');
+      btn.onclick = function () {
+        pre.select();
+        pre.setSelectionRange(0, pre.value.length);
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) {}
+        if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { btn.textContent = 'Copied'; }, function () {});
+        else btn.textContent = ok ? 'Copied' : 'Select the text and copy';
+      };
+      box.appendChild(btn);
+      box.appendChild(pre);
+      document.body.appendChild(box);
+    }
+    setTimeout(finish, CAP_MS);
+  })();
+  </script>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="/">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="A portfolio page for Reuben Beeler.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="portfolio">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="_16_x_16_" href="icons/favicon-16.png">
+  <link rel="icon" type="image/png" sizes="_32_x_32_" href="icons/favicon-32.png">
+
+  <title>Reuben's Portfolio</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#00E8F3">
+  
+  <meta property="og:title" content="Reuben's Portfolio">
+  <meta property="og:description" content="A portfolio page for Reuben Beeler.">
+  <!-- <meta property="og:image" content="icons/social-preview.png"> -->
+  <meta property="og:type" content="website">
+
+  
+  <!-- <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"> --> <!-- flutter_native_splash generated this -->
+  
+  
+  <style id="splash-screen-style">
+    html {
+      height: 100%
+    }
+
+    body {
+      margin: 0;
+      min-height: 100%;
+      background-color: #000000;
+          background-size: 100% 100%;
+    }
+
+    .center {
+      margin: 0;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      -ms-transform: translate(-50%, -50%);
+      transform: translate(-50%, -50%);
+    }
+
+    .contain {
+      display:block;
+      width:100%; height:100%;
+      object-fit: contain;
+    }
+
+    .stretch {
+      display:block;
+      width:100%; height:100%;
+    }
+
+    .cover {
+      display:block;
+      width:100%; height:100%;
+      object-fit: cover;
+    }
+
+    .bottom {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      -ms-transform: translate(-50%, 0);
+      transform: translate(-50%, 0);
+    }
+
+    .bottomLeft {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+    }
+
+    .bottomRight {
+      position: absolute;
+      bottom: 0;
+      right: 0;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      body {
+        background-color: #000000;
+          }
+    }
+  </style>
+  <script id="splash-screen-script">
+    function removeSplashFromWeb() {
+      document.getElementById("splash")?.remove();
+      document.getElementById("splash-branding")?.remove();
+      document.body.style.background = "transparent";
+    }
+  </script>
+
+  <!--
+    The loading screen lives here, not in Dart.
+
+    Nothing Dart draws can appear until the engine and the app binary have
+    downloaded, which was ~3.7s on a cold load: the whole fly-in was invisible
+    to exactly the visitors it exists for. CSS can draw at first paint, so the
+    fly-in, the wait and the fly-out all run here, and Dart takes over for the
+    fade to the page. The keyframes below are DoubleConOscCurve sampled every
+    5%, so the motion is the same curve the Dart version used.
+  -->
+  <style id="boot-splash-style">
+    @font-face {
+      font-family: 'SplashRoboto';
+      src: url('assets/google_fonts/Roboto-Regular.ttf') format('truetype');
+      font-display: swap;
+    }
+
+    #boot-splash {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483000;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'SplashRoboto', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      font-size: min(15vw, 40vh);
+      line-height: 1;
+      color: #fff;
+      /* matches the Dart travel: screen height plus one line of text */
+      --travel: calc(100vh + 1.2em);
+    }
+
+    #boot-splash span {
+      display: inline-block;
+      will-change: transform;
+      /* parked off the bottom until the fly-in starts */
+      transform: translateY(calc(var(--travel) * 0.5));
+    }
+
+    #boot-splash.parked span { transform: none; animation: none; }
+    #boot-splash.in span { animation: boot-splash-in 650ms linear both; }
+    #boot-splash.out span { animation: boot-splash-out 650ms linear both; }
+
+    @keyframes boot-splash-in {
+      0% { transform: translateY(calc(var(--travel) * 0.5000)); }
+      5% { transform: translateY(calc(var(--travel) * 0.5081)); }
+      10% { transform: translateY(calc(var(--travel) * 0.5263)); }
+      15% { transform: translateY(calc(var(--travel) * 0.5452)); }
+      20% { transform: translateY(calc(var(--travel) * 0.5558)); }
+      25% { transform: translateY(calc(var(--travel) * 0.5511)); }
+      30% { transform: translateY(calc(var(--travel) * 0.5266)); }
+      35% { transform: translateY(calc(var(--travel) * 0.4810)); }
+      40% { transform: translateY(calc(var(--travel) * 0.4163)); }
+      45% { transform: translateY(calc(var(--travel) * 0.3370)); }
+      50% { transform: translateY(calc(var(--travel) * 0.2500)); }
+      55% { transform: translateY(calc(var(--travel) * 0.1630)); }
+      60% { transform: translateY(calc(var(--travel) * 0.0837)); }
+      65% { transform: translateY(calc(var(--travel) * 0.0190)); }
+      70% { transform: translateY(calc(var(--travel) * -0.0266)); }
+      75% { transform: translateY(calc(var(--travel) * -0.0511)); }
+      80% { transform: translateY(calc(var(--travel) * -0.0558)); }
+      85% { transform: translateY(calc(var(--travel) * -0.0452)); }
+      90% { transform: translateY(calc(var(--travel) * -0.0263)); }
+      95% { transform: translateY(calc(var(--travel) * -0.0081)); }
+      100% { transform: translateY(calc(var(--travel) * 0.0000)); }
+    }
+
+    @keyframes boot-splash-out {
+      0% { transform: translateY(calc(var(--travel) * -0.0000)); }
+      5% { transform: translateY(calc(var(--travel) * 0.0081)); }
+      10% { transform: translateY(calc(var(--travel) * 0.0263)); }
+      15% { transform: translateY(calc(var(--travel) * 0.0452)); }
+      20% { transform: translateY(calc(var(--travel) * 0.0558)); }
+      25% { transform: translateY(calc(var(--travel) * 0.0511)); }
+      30% { transform: translateY(calc(var(--travel) * 0.0266)); }
+      35% { transform: translateY(calc(var(--travel) * -0.0190)); }
+      40% { transform: translateY(calc(var(--travel) * -0.0837)); }
+      45% { transform: translateY(calc(var(--travel) * -0.1630)); }
+      50% { transform: translateY(calc(var(--travel) * -0.2500)); }
+      55% { transform: translateY(calc(var(--travel) * -0.3370)); }
+      60% { transform: translateY(calc(var(--travel) * -0.4163)); }
+      65% { transform: translateY(calc(var(--travel) * -0.4810)); }
+      70% { transform: translateY(calc(var(--travel) * -0.5266)); }
+      75% { transform: translateY(calc(var(--travel) * -0.5511)); }
+      80% { transform: translateY(calc(var(--travel) * -0.5558)); }
+      85% { transform: translateY(calc(var(--travel) * -0.5452)); }
+      90% { transform: translateY(calc(var(--travel) * -0.5263)); }
+      95% { transform: translateY(calc(var(--travel) * -0.5081)); }
+      100% { transform: translateY(calc(var(--travel) * -0.5000)); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #boot-splash span { transform: none; }
+      #boot-splash.in span, #boot-splash.out span, #boot-splash.parked span { animation: none; }
+      #boot-splash.out span { opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div id="boot-splash" aria-hidden="true">
+    <div>
+      <span data-delay="0">L</span>
+      <span data-delay="72">o</span>
+      <span data-delay="144">a</span>
+      <span data-delay="217">d</span>
+      <span data-delay="289">i</span>
+      <span data-delay="361">n</span>
+      <span data-delay="433">g</span>
+      <span data-delay="506">.</span>
+      <span data-delay="578">.</span>
+      <span data-delay="650">.</span>
+    </div>
+  </div>
+  <!--
+    Moved out of <head>: as a parser-blocking script it held up <body>, so the
+    loading screen could not paint until this round trip finished. Down here it
+    still runs long before anything needs SharedArrayBuffer, and on the second
+    document it is a cache hit.
+  -->
+  <script src="coi-serviceworker.js"></script>
+  <script id="boot-splash-script">
+  (function () {
+    var el = document.getElementById('boot-splash');
+    if (!el) return;
+    var spans = el.getElementsByTagName('span');
+    var reduced = false;
+    try { reduced = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+    var TOTAL = reduced ? 0 : 1300;
+    var KEY = 'bootSplashStart';
+    var phase = function (name) { try { if (window.__bootPhase) window.__bootPhase(name); } catch (e) {} };
+    var read = function () { try { return sessionStorage.getItem(KEY); } catch (e) { return null; } };
+    var write = function (v) { try { sessionStorage.setItem(KEY, v); } catch (e) {} };
+    var clear = function () { try { sessionStorage.removeItem(KEY); } catch (e) {} };
+
+    var started = false, flyInDone = false, wantOut = false, leaving = false;
+
+    function setDelays(offset) {
+      for (var i = 0; i < spans.length; i++) {
+        spans[i].style.animationDelay = (parseFloat(spans[i].getAttribute('data-delay')) - offset) + 'ms';
+      }
+    }
+
+    function start() {
+      if (started) return;
+      started = true;
+
+      // coi-serviceworker reloads the document once, to get the headers that
+      // make SharedArrayBuffer (and therefore the threaded renderer) available.
+      // Pick the animation up where the previous document left it instead of
+      // replaying it, so the reload is invisible.
+      var prior = parseFloat(read() || '0') || 0;
+      var elapsed = prior > 0 ? Date.now() - prior : 0;
+      if (prior <= 0 || elapsed < 0) { write(String(Date.now())); elapsed = 0; }
+
+      if (elapsed >= TOTAL) {
+        flyInDone = true;
+        el.classList.add('parked');
+        phase('WAITING');
+        return flyOut();
+      }
+      phase('FLY_IN');
+      setDelays(elapsed);
+      el.classList.add('in');
+      setTimeout(function () {
+        flyInDone = true;
+        phase('WAITING');
+        flyOut();
+      }, TOTAL - elapsed);
+    }
+
+    function flyOut() {
+      if (leaving || !wantOut || !flyInDone) return;
+      leaving = true;
+      phase('FLY_OUT');
+      setDelays(0);
+      el.classList.remove('in');
+      el.classList.remove('parked');
+      el.classList.add('out');
+      setTimeout(function () {
+        phase('flag:splashRemoved');
+        clear();
+        // The Flutter canvas underneath is already painting an opaque black
+        // backdrop, so removing this is invisible; Dart fades from there.
+        try { if (window.__splashDone) window.__splashDone(); } catch (e) {}
+        el.remove();
+      }, TOTAL);
+    }
+
+    // Dart calls this once the page behind is built, laid out and fonted.
+    window.__splashFlyOut = function () { wantOut = true; flyOut(); };
+
+    // Start in the real face as soon as it is ready. The cap is the fallback:
+    // it is long enough that a cold load usually has the font by then (so the
+    // letters never swap face mid-flight) and still far shorter than the black
+    // screen this splash exists to replace. Subsetting the font to the eight
+    // glyphs of "Loading..." would remove the trade-off entirely.
+    if (document.fonts && document.fonts.load) {
+      document.fonts.load('1em "SplashRoboto"').then(start, start);
+    }
+    setTimeout(start, 1200);
+  })();
+  </script>
+  <script src="flutter_bootstrap.js" async=""></script>
+</body></html>
